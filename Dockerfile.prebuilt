@@ -1,0 +1,23 @@
+# Lightweight Dockerfile using pre-built web assets
+# Use this if you've already built the web app with build_all.sh
+FROM nginx:alpine
+
+# Copy custom nginx configuration
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+
+# Copy the pre-built web app
+COPY build/web /usr/share/nginx/html
+
+# Create a non-root user for nginx
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    chmod -R 755 /usr/share/nginx/html
+
+# Expose port 80
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

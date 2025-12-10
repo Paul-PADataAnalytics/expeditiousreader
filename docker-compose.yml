@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # Production service - uses prebuilt web assets
+  expeditiousreader:
+    build:
+      context: .
+      dockerfile: Dockerfile.prebuilt
+    container_name: expeditiousreader-web
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    environment:
+      - NGINX_ENTRYPOINT_QUIET_LOGS=1
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    labels:
+      - "com.expeditiousreader.description=Expeditious Reader Web App"
+      - "com.expeditiousreader.version=1.0.0"
+
+  # Development service - builds from source (slower but includes everything)
+  expeditiousreader-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: expeditiousreader-web-dev
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+    environment:
+      - NGINX_ENTRYPOINT_QUIET_LOGS=1
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    profiles:
+      - dev
+    labels:
+      - "com.expeditiousreader.description=Expeditious Reader Web App (Development Build)"
+      - "com.expeditiousreader.version=dev"
