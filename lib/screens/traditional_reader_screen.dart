@@ -355,38 +355,55 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
             minHeight: 4,
           ),
 
-          // Page content
+          // Page content with LayoutBuilder to detect size changes
           Expanded(
-            child: GestureDetector(
-              key: _contentKey,
-              onTapUp: (details) {
-                final width = MediaQuery.of(context).size.width;
-                if (details.localPosition.dx > width * 0.6) {
-                  _nextPage();
-                } else if (details.localPosition.dx < width * 0.4) {
-                  _previousPage();
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Check if dimensions have changed significantly (more than 10px)
+                final needsRelayout = _cachedAvailableWidth == null ||
+                    _cachedAvailableHeight == null ||
+                    (constraints.maxWidth - (_cachedAvailableWidth! + 64)).abs() > 10 ||
+                    (constraints.maxHeight - (_cachedAvailableHeight! + 64)).abs() > 10;
+                
+                if (needsRelayout && !_isLoading && _words.isNotEmpty) {
+                  // Schedule relayout after this frame
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _layoutCurrentPage();
+                  });
                 }
-              },
-              child: Container(
-                color: settings.backgroundColor,
-                child: _isLoading
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const CircularProgressIndicator(),
-                            const SizedBox(height: 16),
-                            Text(
-                              _loadingMessage,
-                              style: TextStyle(color: settings.textColor),
+                
+                return GestureDetector(
+                  key: _contentKey,
+                  onTapUp: (details) {
+                    final width = MediaQuery.of(context).size.width;
+                    if (details.localPosition.dx > width * 0.6) {
+                      _nextPage();
+                    } else if (details.localPosition.dx < width * 0.4) {
+                      _previousPage();
+                    }
+                  },
+                  child: Container(
+                    color: settings.backgroundColor,
+                    child: _isLoading
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const CircularProgressIndicator(),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _loadingMessage,
+                                  style: TextStyle(color: settings.textColor),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                      )
-                    : _currentPage == null
-                        ? const Center(child: Text('No content available'))
-                        : _buildPageContent(settings),
-              ),
+                          )
+                        : _currentPage == null
+                            ? const Center(child: Text('No content available'))
+                            : _buildPageContent(settings),
+                  ),
+                );
+              },
             ),
           ),
 

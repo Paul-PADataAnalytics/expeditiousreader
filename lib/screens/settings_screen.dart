@@ -17,6 +17,58 @@ class SettingsScreen extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.all(16.0),
             child: Text(
+              'Appearance',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Consumer<SettingsProvider>(
+            builder: (context, provider, child) => Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.brightness_6),
+                  title: const Text('Theme Mode'),
+                  subtitle: Text(_getThemeModeName(provider.settings.themeMode)),
+                  trailing: SegmentedButton<ThemeMode>(
+                    segments: const [
+                      ButtonSegment<ThemeMode>(
+                        value: ThemeMode.light,
+                        icon: Icon(Icons.light_mode, size: 16),
+                        label: Text('Light'),
+                      ),
+                      ButtonSegment<ThemeMode>(
+                        value: ThemeMode.dark,
+                        icon: Icon(Icons.dark_mode, size: 16),
+                        label: Text('Dark'),
+                      ),
+                      ButtonSegment<ThemeMode>(
+                        value: ThemeMode.system,
+                        icon: Icon(Icons.brightness_auto, size: 16),
+                        label: Text('Auto'),
+                      ),
+                    ],
+                    selected: {provider.settings.themeMode},
+                    onSelectionChanged: (Set<ThemeMode> selected) {
+                      provider.updateThemeMode(selected.first);
+                    },
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Text(
+                    'Note: Reader theme (Light/Dark/Sepia) can be adjusted separately in each reading mode.',
+                    style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(),
+          const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text(
               'Speed Reading',
               style: TextStyle(
                 fontSize: 18,
@@ -104,6 +156,85 @@ class SettingsScreen extends StatelessWidget {
                       provider.settings.copyWith(pauseOnSentenceEnd: value),
                     );
                   },
+                ),
+                const Divider(indent: 16, endIndent: 16),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Text(
+                    'Speed Reader Theme',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Light'),
+                        selected: provider.settings.backgroundColor == Colors.white,
+                        onSelected: (selected) {
+                          if (selected) {
+                            provider.updateColors(
+                              backgroundColor: Colors.white,
+                              textColor: Colors.black,
+                            );
+                          }
+                        },
+                      ),
+                      ChoiceChip(
+                        label: const Text('Dark'),
+                        selected: provider.settings.backgroundColor == Colors.black,
+                        onSelected: (selected) {
+                          if (selected) {
+                            provider.updateColors(
+                              backgroundColor: Colors.black,
+                              textColor: Colors.white,
+                            );
+                          }
+                        },
+                      ),
+                      ChoiceChip(
+                        label: const Text('Sepia'),
+                        selected: provider.settings.backgroundColor == const Color(0xFFF4ECD8),
+                        onSelected: (selected) {
+                          if (selected) {
+                            provider.updateColors(
+                              backgroundColor: const Color(0xFFF4ECD8),
+                              textColor: const Color(0xFF5B4636),
+                            );
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+          const Divider(),
+          const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text(
+              'Appearance',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Consumer<SettingsProvider>(
+            builder: (context, provider, child) => Column(
+              children: [
+                ListTile(
+                  title: const Text('App Theme'),
+                  subtitle: Text(_getThemeDescription(provider.settings.themeMode)),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () => _showThemeDialog(context, provider),
                 ),
               ],
             ),
@@ -291,5 +422,83 @@ class SettingsScreen extends StatelessWidget {
     } else {
       return 'sepia';
     }
+  }
+
+  String _getThemeDescription(ThemeMode themeMode) {
+    switch (themeMode) {
+      case ThemeMode.light:
+        return 'Light Mode';
+      case ThemeMode.dark:
+        return 'Dark Mode';
+      case ThemeMode.system:
+        return 'System Default';
+    }
+  }
+
+  String _getThemeModeName(ThemeMode themeMode) {
+    switch (themeMode) {
+      case ThemeMode.light:
+        return 'Always Light';
+      case ThemeMode.dark:
+        return 'Always Dark';
+      case ThemeMode.system:
+        return 'Follow System';
+    }
+  }
+
+  void _showThemeDialog(BuildContext context, SettingsProvider provider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Choose Theme'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RadioListTile<ThemeMode>(
+              title: const Text('Light Mode'),
+              subtitle: const Text('Always use light theme'),
+              value: ThemeMode.light,
+              groupValue: provider.settings.themeMode,
+              onChanged: (value) {
+                if (value != null) {
+                  provider.updateThemeMode(value);
+                  Navigator.pop(context);
+                }
+              },
+            ),
+            RadioListTile<ThemeMode>(
+              title: const Text('Dark Mode'),
+              subtitle: const Text('Always use dark theme'),
+              value: ThemeMode.dark,
+              groupValue: provider.settings.themeMode,
+              onChanged: (value) {
+                if (value != null) {
+                  provider.updateThemeMode(value);
+                  Navigator.pop(context);
+                }
+              },
+            ),
+            RadioListTile<ThemeMode>(
+              title: const Text('System Default'),
+              subtitle: const Text('Follow system theme settings'),
+              value: ThemeMode.system,
+              groupValue: provider.settings.themeMode,
+              onChanged: (value) {
+                if (value != null) {
+                  provider.updateThemeMode(value);
+                  Navigator.pop(context);
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 }

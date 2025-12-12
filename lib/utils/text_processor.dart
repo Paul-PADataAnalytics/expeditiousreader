@@ -105,11 +105,11 @@ class TextProcessor {
       if (currentWordCount > 0 && currentWordCount + paragraphWordCount > wordsPerPage) {
         // Save current page and start a new one
         pages.add(currentPage.trim());
-        currentPage = paragraph + '\n\n';
+        currentPage = '$paragraph\n\n';
         currentWordCount = paragraphWordCount;
       } else {
         // Add paragraph to current page
-        currentPage += paragraph + '\n\n';
+        currentPage += '$paragraph\n\n';
         currentWordCount += paragraphWordCount;
       }
     }

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import '../models/reading_settings.dart';
 import '../services/settings_service.dart';
 
@@ -55,5 +56,10 @@ class SettingsProvider extends ChangeNotifier {
       backgroundColor: backgroundColor,
       textColor: textColor,
     ));
+  }
+
+  /// Update theme mode
+  Future<void> updateThemeMode(ThemeMode themeMode) async {
+    await updateSettings(_settings.copyWith(themeMode: themeMode));
   }
 }

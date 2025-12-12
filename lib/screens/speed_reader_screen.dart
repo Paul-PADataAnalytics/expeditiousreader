@@ -530,12 +530,16 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Reading Settings'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Font Size'),
-            Consumer<SettingsProvider>(
-              builder: (context, provider, child) => Slider(
+        content: Consumer<SettingsProvider>(
+          builder: (context, provider, child) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Font Size',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              Slider(
                 value: provider.settings.speedReaderFontSize,
                 min: 16,
                 max: 72,
@@ -545,8 +549,55 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
                   provider.updateSpeedReaderFontSize(value);
                 },
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              const Text(
+                'Theme',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Light'),
+                    selected: provider.settings.backgroundColor == Colors.white,
+                    onSelected: (selected) {
+                      if (selected) {
+                        provider.updateColors(
+                          backgroundColor: Colors.white,
+                          textColor: Colors.black,
+                        );
+                      }
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('Dark'),
+                    selected: provider.settings.backgroundColor == Colors.black,
+                    onSelected: (selected) {
+                      if (selected) {
+                        provider.updateColors(
+                          backgroundColor: Colors.black,
+                          textColor: Colors.white,
+                        );
+                      }
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('Sepia'),
+                    selected: provider.settings.backgroundColor == const Color(0xFFF4ECD8),
+                    onSelected: (selected) {
+                      if (selected) {
+                        provider.updateColors(
+                          backgroundColor: const Color(0xFFF4ECD8),
+                          textColor: const Color(0xFF5B4636),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(

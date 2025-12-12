@@ -15,6 +15,7 @@ class ReadingSettings {
   final int numberOfColumns; // Number of columns for traditional reading
   final double columnGap; // Gap between columns in pixels
   final double lineHeight; // Line height multiplier
+  final ThemeMode themeMode; // Light, dark, or system theme
 
   ReadingSettings({
     this.wordsPerMinute = 300,
@@ -31,11 +32,22 @@ class ReadingSettings {
     this.numberOfColumns = 2,
     this.columnGap = 32.0,
     this.lineHeight = 1.6,
+    this.themeMode = ThemeMode.system,
   });
 
   factory ReadingSettings.fromJson(Map<String, dynamic> json) {
     // For backwards compatibility, if old 'fontSize' exists, use it for both
     final oldFontSize = (json['fontSize'] as num?)?.toDouble();
+    
+    // Parse theme mode
+    ThemeMode themeMode = ThemeMode.system;
+    if (json['themeMode'] != null) {
+      final themeModeString = json['themeMode'] as String;
+      themeMode = ThemeMode.values.firstWhere(
+        (e) => e.toString() == themeModeString,
+        orElse: () => ThemeMode.system,
+      );
+    }
     
     return ReadingSettings(
       wordsPerMinute: json['wordsPerMinute'] as int? ?? 300,
@@ -52,6 +64,7 @@ class ReadingSettings {
       numberOfColumns: json['numberOfColumns'] as int? ?? 2,
       columnGap: (json['columnGap'] as num?)?.toDouble() ?? 32.0,
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.6,
+      themeMode: themeMode,
     );
   }
 
@@ -71,6 +84,7 @@ class ReadingSettings {
       'numberOfColumns': numberOfColumns,
       'columnGap': columnGap,
       'lineHeight': lineHeight,
+      'themeMode': themeMode.toString(),
     };
   }
 
@@ -89,6 +103,7 @@ class ReadingSettings {
     int? numberOfColumns,
     double? columnGap,
     double? lineHeight,
+    ThemeMode? themeMode,
   }) {
     return ReadingSettings(
       wordsPerMinute: wordsPerMinute ?? this.wordsPerMinute,
@@ -105,6 +120,7 @@ class ReadingSettings {
       numberOfColumns: numberOfColumns ?? this.numberOfColumns,
       columnGap: columnGap ?? this.columnGap,
       lineHeight: lineHeight ?? this.lineHeight,
+      themeMode: themeMode ?? this.themeMode,
     );
   }
 }

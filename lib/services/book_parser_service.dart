@@ -52,7 +52,7 @@ class BookParserService {
       String chapterText = _extractTextFromHtml(chapter.HtmlContent ?? '');
       if (chapterText.isNotEmpty) {
         chapters.add(chapterText);
-        fullText += chapterText + '\n\n';
+        fullText += '$chapterText\n\n';
       }
     }
 
@@ -151,7 +151,7 @@ class BookParserService {
     for (int i = 0; i < document.pages.count; i++) {
       final PdfTextExtractor extractor = PdfTextExtractor(document);
       final String pageText = extractor.extractText(startPageIndex: i, endPageIndex: i);
-      fullText += pageText + '\n';
+      fullText += '$pageText\n';
     }
 
     document.dispose();
@@ -316,7 +316,7 @@ class BookParserService {
       String chapterText = _extractTextFromHtml(chapter.HtmlContent ?? '');
       if (chapterText.isNotEmpty) {
         chapters.add(chapterText);
-        fullText += chapterText + '\n\n';
+        fullText += '$chapterText\n\n';
       }
     }
 
@@ -387,7 +387,7 @@ class BookParserService {
     for (int i = 0; i < document.pages.count; i++) {
       final PdfTextExtractor extractor = PdfTextExtractor(document);
       final String pageText = extractor.extractText(startPageIndex: i, endPageIndex: i);
-      fullText += pageText + '\n';
+      fullText += '$pageText\n';
     }
 
     document.dispose();
