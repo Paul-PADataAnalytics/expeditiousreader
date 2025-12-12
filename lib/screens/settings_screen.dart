@@ -1,3 +1,4 @@
+// filepath: /home/paul/Documents/projects/expeditiousreader/lib/screens/settings_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
@@ -14,38 +15,30 @@ class SettingsScreen extends StatelessWidget {
       ),
       body: ListView(
         children: [
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'Appearance',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+          // APPEARANCE SECTION
+          _buildSectionHeader('Appearance'),
           Consumer<SettingsProvider>(
             builder: (context, provider, child) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ListTile(
-                  leading: const Icon(Icons.brightness_6),
-                  title: const Text('Theme Mode'),
-                  subtitle: Text(_getThemeModeName(provider.settings.themeMode)),
-                  trailing: SegmentedButton<ThemeMode>(
+                _buildSubsectionHeader(context, 'App Theme'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: SegmentedButton<ThemeMode>(
                     segments: const [
                       ButtonSegment<ThemeMode>(
                         value: ThemeMode.light,
-                        icon: Icon(Icons.light_mode, size: 16),
+                        icon: Icon(Icons.light_mode, size: 18),
                         label: Text('Light'),
                       ),
                       ButtonSegment<ThemeMode>(
                         value: ThemeMode.dark,
-                        icon: Icon(Icons.dark_mode, size: 16),
+                        icon: Icon(Icons.dark_mode, size: 18),
                         label: Text('Dark'),
                       ),
                       ButtonSegment<ThemeMode>(
                         value: ThemeMode.system,
-                        icon: Icon(Icons.brightness_auto, size: 16),
+                        icon: Icon(Icons.brightness_auto, size: 18),
                         label: Text('Auto'),
                       ),
                     ],
@@ -55,29 +48,19 @@ class SettingsScreen extends StatelessWidget {
                     },
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Text(
-                    'Note: Reader theme (Light/Dark/Sepia) can be adjusted separately in each reading mode.',
-                    style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
-                  ),
-                ),
+                _buildHintText(context, _getThemeModeName(provider.settings.themeMode)),
+                const SizedBox(height: 8),
               ],
             ),
           ),
-          const Divider(),
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'Speed Reading',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+          
+          const Divider(height: 32),
+
+          // SPEED READING SECTION
+          _buildSectionHeader('Speed Reading'),
           Consumer<SettingsProvider>(
             builder: (context, provider, child) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ListTile(
                   title: const Text('Font Size'),
@@ -157,19 +140,13 @@ class SettingsScreen extends StatelessWidget {
                     );
                   },
                 ),
-                const Divider(indent: 16, endIndent: 16),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Text(
-                    'Speed Reader Theme',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
+                
+                const Divider(indent: 16, endIndent: 16, height: 32),
+                
+                _buildSubsectionHeader(context, 'Reading Theme'),
+                _buildHintText(context, 'Choose the color scheme for speed reading mode'),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                   child: Wrap(
                     spacing: 8,
                     children: [
@@ -216,42 +193,14 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
-          const Divider(),
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'Appearance',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+
+          const Divider(height: 32),
+
+          // TRADITIONAL READING SECTION
+          _buildSectionHeader('Traditional Reading'),
           Consumer<SettingsProvider>(
             builder: (context, provider, child) => Column(
-              children: [
-                ListTile(
-                  title: const Text('App Theme'),
-                  subtitle: Text(_getThemeDescription(provider.settings.themeMode)),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () => _showThemeDialog(context, provider),
-                ),
-              ],
-            ),
-          ),
-          const Divider(),
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'Traditional Reading',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Consumer<SettingsProvider>(
-            builder: (context, provider, child) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ListTile(
                   title: const Text('Font Size'),
@@ -289,91 +238,87 @@ class SettingsScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                
+                const Divider(indent: 16, endIndent: 16, height: 32),
+                
+                _buildSubsectionHeader(context, 'Reading Theme'),
+                _buildHintText(context, 'Choose the color scheme for traditional reading mode'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Light'),
+                        selected: provider.settings.backgroundColor == Colors.white,
+                        onSelected: (selected) {
+                          if (selected) {
+                            provider.updateColors(
+                              backgroundColor: Colors.white,
+                              textColor: Colors.black,
+                            );
+                          }
+                        },
+                      ),
+                      ChoiceChip(
+                        label: const Text('Dark'),
+                        selected: provider.settings.backgroundColor == Colors.black,
+                        onSelected: (selected) {
+                          if (selected) {
+                            provider.updateColors(
+                              backgroundColor: Colors.black,
+                              textColor: Colors.white,
+                            );
+                          }
+                        },
+                      ),
+                      ChoiceChip(
+                        label: const Text('Sepia'),
+                        selected: provider.settings.backgroundColor == const Color(0xFFF4ECD8),
+                        onSelected: (selected) {
+                          if (selected) {
+                            provider.updateColors(
+                              backgroundColor: const Color(0xFFF4ECD8),
+                              textColor: const Color(0xFF5B4636),
+                            );
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
               ],
             ),
           ),
-          const Divider(),
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'Appearance',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Consumer<SettingsProvider>(
-            builder: (context, provider, child) => Column(
-              children: [
-                ListTile(
-                  title: const Text('Light Theme'),
-                  leading: Radio<String>(
-                    value: 'light',
-                    groupValue: _getTheme(provider),
-                    onChanged: (value) {
-                      provider.updateColors(
-                        backgroundColor: Colors.white,
-                        textColor: Colors.black,
-                      );
-                    },
-                  ),
-                ),
-                ListTile(
-                  title: const Text('Dark Theme'),
-                  leading: Radio<String>(
-                    value: 'dark',
-                    groupValue: _getTheme(provider),
-                    onChanged: (value) {
-                      provider.updateColors(
-                        backgroundColor: Colors.black,
-                        textColor: Colors.white,
-                      );
-                    },
-                  ),
-                ),
-                ListTile(
-                  title: const Text('Sepia Theme'),
-                  leading: Radio<String>(
-                    value: 'sepia',
-                    groupValue: _getTheme(provider),
-                    onChanged: (value) {
-                      provider.updateColors(
-                        backgroundColor: const Color(0xFFF4ECD8),
-                        textColor: const Color(0xFF5B4636),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(),
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'About',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+
+          const Divider(height: 32),
+
+          // ABOUT SECTION
+          _buildSectionHeader('About'),
           const ListTile(
             title: Text('Version'),
             subtitle: Text('1.0.0'),
+            leading: Icon(Icons.info_outline),
           ),
           const ListTile(
             title: Text('Expeditious Reader'),
             subtitle: Text('A speed reading and ebook management application'),
+            leading: Icon(Icons.book),
           ),
-          const Divider(),
+
+          const Divider(height: 32),
+
+          // RESET BUTTON
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Consumer<SettingsProvider>(
-              builder: (context, provider, child) => ElevatedButton.icon(
+              builder: (context, provider, child) => OutlinedButton.icon(
                 icon: const Icon(Icons.refresh),
-                label: const Text('Reset Settings to Default'),
+                label: const Text('Reset All Settings to Default'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                ),
                 onPressed: () async {
                   final confirmed = await showDialog<bool>(
                     context: context,
@@ -387,7 +332,7 @@ class SettingsScreen extends StatelessWidget {
                           onPressed: () => Navigator.pop(context, false),
                           child: const Text('Cancel'),
                         ),
-                        TextButton(
+                        FilledButton(
                           onPressed: () => Navigator.pop(context, true),
                           child: const Text('Reset'),
                         ),
@@ -409,96 +354,58 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 16),
         ],
       ),
     );
   }
 
-  String _getTheme(SettingsProvider provider) {
-    if (provider.settings.backgroundColor == Colors.white) {
-      return 'light';
-    } else if (provider.settings.backgroundColor == Colors.black) {
-      return 'dark';
-    } else {
-      return 'sepia';
-    }
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16.0, 24.0, 16.0, 8.0),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
   }
 
-  String _getThemeDescription(ThemeMode themeMode) {
-    switch (themeMode) {
-      case ThemeMode.light:
-        return 'Light Mode';
-      case ThemeMode.dark:
-        return 'Dark Mode';
-      case ThemeMode.system:
-        return 'System Default';
-    }
+  Widget _buildSubsectionHeader(BuildContext context, String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 4.0),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHintText(BuildContext context, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontStyle: FontStyle.italic,
+        ),
+      ),
+    );
   }
 
   String _getThemeModeName(ThemeMode themeMode) {
     switch (themeMode) {
       case ThemeMode.light:
-        return 'Always Light';
+        return 'Always use light theme';
       case ThemeMode.dark:
-        return 'Always Dark';
+        return 'Always use dark theme';
       case ThemeMode.system:
-        return 'Follow System';
+        return 'Follow system theme settings';
     }
-  }
-
-  void _showThemeDialog(BuildContext context, SettingsProvider provider) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Choose Theme'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile<ThemeMode>(
-              title: const Text('Light Mode'),
-              subtitle: const Text('Always use light theme'),
-              value: ThemeMode.light,
-              groupValue: provider.settings.themeMode,
-              onChanged: (value) {
-                if (value != null) {
-                  provider.updateThemeMode(value);
-                  Navigator.pop(context);
-                }
-              },
-            ),
-            RadioListTile<ThemeMode>(
-              title: const Text('Dark Mode'),
-              subtitle: const Text('Always use dark theme'),
-              value: ThemeMode.dark,
-              groupValue: provider.settings.themeMode,
-              onChanged: (value) {
-                if (value != null) {
-                  provider.updateThemeMode(value);
-                  Navigator.pop(context);
-                }
-              },
-            ),
-            RadioListTile<ThemeMode>(
-              title: const Text('System Default'),
-              subtitle: const Text('Follow system theme settings'),
-              value: ThemeMode.system,
-              groupValue: provider.settings.themeMode,
-              onChanged: (value) {
-                if (value != null) {
-                  provider.updateThemeMode(value);
-                  Navigator.pop(context);
-                }
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
   }
 }
