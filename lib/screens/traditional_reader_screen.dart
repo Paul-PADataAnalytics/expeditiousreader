@@ -12,27 +12,28 @@ class TraditionalReaderScreen extends StatefulWidget {
   const TraditionalReaderScreen({super.key, required this.book});
 
   @override
-  State<TraditionalReaderScreen> createState() => _TraditionalReaderScreenState();
+  State<TraditionalReaderScreen> createState() =>
+      _TraditionalReaderScreenState();
 }
 
 class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
   final LibraryService _libraryService = LibraryService();
   final GlobalKey _contentKey = GlobalKey();
-  
+
   // Lazy loading: cache pages by their starting word index
   final Map<int, ColumnPage> _pageCache = {};
   ColumnPage? _currentPage;
   int _currentWordPosition = 0;
-  
+
   List<String> _words = [];
   bool _isLoading = true;
   final String _loadingMessage = 'Loading book...';
-  
+
   // Layout parameters (cached after first calculation)
   double? _cachedAvailableWidth;
   double? _cachedAvailableHeight;
   TextStyle? _cachedTextStyle;
-  
+
   // Store provider reference to use in dispose
   LibraryProvider? _libraryProvider;
 
@@ -41,7 +42,7 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
     super.initState();
     _loadBook();
   }
-  
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -58,44 +59,47 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
   Future<void> _loadBook() async {
     try {
       final text = await _libraryService.readBookText(widget.book);
-      
+
       // For traditional reading, reflow text by removing all line breaks
       // This allows proper column-based pagination
       final reflowedText = text
-          .replaceAll('\r\n', ' ')  // Windows line endings
-          .replaceAll('\n', ' ')     // Unix line endings
-          .replaceAll('\r', ' ')     // Old Mac line endings
-          .replaceAll('\t', ' ')     // Tabs
-          .replaceAll(RegExp(r'\s+'), ' ')  // Multiple spaces to single space
+          .replaceAll('\r\n', ' ') // Windows line endings
+          .replaceAll('\n', ' ') // Unix line endings
+          .replaceAll('\r', ' ') // Old Mac line endings
+          .replaceAll('\t', ' ') // Tabs
+          .replaceAll(RegExp(r'\s+'), ' ') // Multiple spaces to single space
           .trim();
-      
+
       _words = reflowedText.split(' ');
-      
+
       // Set initial position from saved progress
-      _currentWordPosition = widget.book.currentPosition.clamp(0, _words.length - 1);
-      
+      _currentWordPosition = widget.book.currentPosition.clamp(
+        0,
+        _words.length - 1,
+      );
+
       // Wait for first frame to get accurate dimensions
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _layoutCurrentPage();
         }
       });
-      
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading book: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error loading book: $e')));
     }
   }
 
   Future<void> _layoutCurrentPage() async {
     final settings = context.read<SettingsProvider>().settings;
-    final renderBox = _contentKey.currentContext?.findRenderObject() as RenderBox?;
-    
+    final renderBox =
+        _contentKey.currentContext?.findRenderObject() as RenderBox?;
+
     if (renderBox == null) {
       // Try again on next frame
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -105,12 +109,17 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
     }
 
     final size = renderBox.size;
-    
+
     // Account for the padding that will be applied in the rendering
     const padding = 32.0;
     final availableWidth = size.width - (padding * 2);
     final availableHeight = size.height - (padding * 2);
-    
+
+    // ignore: avoid_print
+    print(
+      '[TraditionalReader] Layout: Screen=${size.width}x${size.height}, Available=${availableWidth}x$availableHeight, Padding=$padding',
+    );
+
     // Cache layout parameters
     _cachedAvailableWidth = availableWidth;
     _cachedAvailableHeight = availableHeight;
@@ -123,7 +132,7 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
 
     // Calculate just the current page
     final page = await _calculatePage(_currentWordPosition);
-    
+
     if (!mounted) return;
 
     setState(() {
@@ -140,7 +149,7 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
     }
 
     final settings = context.read<SettingsProvider>().settings;
-    
+
     // Calculate the page
     final page = await Future.microtask(() {
       return ColumnTextLayout.layoutText(
@@ -155,18 +164,19 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
         maxPages: 1, // Only calculate one page
         startWordIndex: startWordIndex,
         preProcessedWords: _words,
+        textScaler: MediaQuery.of(context).textScaler,
       );
     });
 
     if (page.isNotEmpty) {
       // Cache the page (keep cache size reasonable)
       _pageCache[startWordIndex] = page.first;
-      
+
       // Limit cache size to prevent memory issues (keep last 10 pages)
       if (_pageCache.length > 10) {
         final keysToRemove = _pageCache.keys.toList()..sort();
         final currentIndex = keysToRemove.indexOf(startWordIndex);
-        
+
         // Remove pages far from current position
         for (var i = 0; i < keysToRemove.length; i++) {
           if ((i < currentIndex - 5) || (i > currentIndex + 5)) {
@@ -174,7 +184,7 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
           }
         }
       }
-      
+
       return page.first;
     }
 
@@ -188,39 +198,41 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
 
   /// Find the start of the previous page by working backward
   Future<int> _findPreviousPageStart(int currentPageStart) async {
-    // We need to find the word index that, when laid out as a page, 
+    // We need to find the word index that, when laid out as a page,
     // ends exactly at currentPageStart (or as close as possible)
-    
+
     if (currentPageStart <= 0) {
       return 0;
     }
-    
+
     // Binary search to find the page that ends closest to currentPageStart
     int searchStart = 0;
     int searchEnd = currentPageStart - 1;
     int bestCandidate = 0;
     int bestEndDifference = currentPageStart; // How far off from target
-    
+
     // Start with a guess based on current page size
     final currentPage = _currentPage;
     if (currentPage != null && currentPage.wordCount > 0) {
-      searchStart = (currentPageStart - currentPage.wordCount * 1.5).round().clamp(0, searchEnd);
+      searchStart = (currentPageStart - currentPage.wordCount * 1.5)
+          .round()
+          .clamp(0, searchEnd);
     } else {
       searchStart = (currentPageStart - 200).clamp(0, searchEnd);
     }
-    
+
     while (searchStart <= searchEnd) {
       final mid = (searchStart + searchEnd) ~/ 2;
       final testPage = await _calculatePage(mid);
-      
+
       final endDifference = (testPage.endWordIndex - currentPageStart).abs();
-      
+
       // Track the best candidate (closest to ending at currentPageStart)
       if (endDifference < bestEndDifference) {
         bestCandidate = testPage.startWordIndex;
         bestEndDifference = endDifference;
       }
-      
+
       // If this page ends exactly at currentPageStart, we found it!
       if (testPage.endWordIndex == currentPageStart) {
         return testPage.startWordIndex;
@@ -232,31 +244,31 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
         searchEnd = mid - 1;
       }
     }
-    
+
     // If we didn't find exact match, use the best candidate
     if (bestEndDifference <= 50) {
       return bestCandidate;
     }
-    
+
     return 0;
   }
 
   /// Recalculate current page when settings change
   Future<void> _relayoutPage() async {
     if (_currentPage == null) return;
-    
+
     // Clear the cache since layout parameters have changed
     _pageCache.clear();
-    
+
     // Clear cached layout parameters to force recalculation
     _cachedTextStyle = null;
-    
+
     // Get current position before recalculating
     final currentPosition = _currentPage!.startWordIndex;
-    
+
     // Recalculate with new settings
     final settings = context.read<SettingsProvider>().settings;
-    
+
     // Update cached text style
     _cachedTextStyle = TextStyle(
       fontSize: settings.traditionalFontSize,
@@ -264,12 +276,12 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
       fontFamily: settings.fontFamily,
       height: settings.lineHeight,
     );
-    
+
     // Recalculate current page
     final newPage = await _calculatePage(currentPosition);
-    
+
     if (!mounted) return;
-    
+
     setState(() {
       _currentPage = newPage;
     });
@@ -277,24 +289,22 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
 
   void _saveProgress() {
     if (_currentPage == null) return;
-    
+
     final wordPosition = _currentPage!.startWordIndex;
-    
+
     // Use stored provider reference instead of context.read
-    _libraryProvider?.updateProgress(
-      widget.book.id,
-      position: wordPosition,
-    );
+    _libraryProvider?.updateProgress(widget.book.id, position: wordPosition);
   }
 
   Future<void> _nextPage() async {
-    if (_currentPage == null || _currentPage!.endWordIndex >= _words.length) return;
-    
+    if (_currentPage == null || _currentPage!.endWordIndex >= _words.length)
+      return;
+
     // Calculate next page starting from where current page ends
     final nextPage = await _calculatePage(_currentPage!.endWordIndex);
-    
+
     if (!mounted) return;
-    
+
     setState(() {
       _currentPage = nextPage;
       _currentWordPosition = nextPage.startWordIndex;
@@ -304,13 +314,15 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
 
   Future<void> _previousPage() async {
     if (_currentPage == null || _currentPage!.startWordIndex <= 0) return;
-    
+
     // Find where the previous page starts
-    final previousPageStart = await _findPreviousPageStart(_currentPage!.startWordIndex);
+    final previousPageStart = await _findPreviousPageStart(
+      _currentPage!.startWordIndex,
+    );
     final previousPage = await _calculatePage(previousPageStart);
-    
+
     if (!mounted) return;
-    
+
     setState(() {
       _currentPage = previousPage;
       _currentWordPosition = previousPage.startWordIndex;
@@ -320,7 +332,7 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
 
   double _getProgress() {
     if (_currentPage == null || _words.isEmpty) return 0.0;
-    
+
     return _currentPage!.startWordIndex / _words.length;
   }
 
@@ -350,28 +362,30 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
       body: Column(
         children: [
           // Progress bar
-          LinearProgressIndicator(
-            value: _getProgress(),
-            minHeight: 4,
-          ),
+          LinearProgressIndicator(value: _getProgress(), minHeight: 4),
 
           // Page content with LayoutBuilder to detect size changes
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
                 // Check if dimensions have changed significantly (more than 10px)
-                final needsRelayout = _cachedAvailableWidth == null ||
+                final needsRelayout =
+                    _cachedAvailableWidth == null ||
                     _cachedAvailableHeight == null ||
-                    (constraints.maxWidth - (_cachedAvailableWidth! + 64)).abs() > 10 ||
-                    (constraints.maxHeight - (_cachedAvailableHeight! + 64)).abs() > 10;
-                
+                    (constraints.maxWidth - (_cachedAvailableWidth! + 64))
+                            .abs() >
+                        10 ||
+                    (constraints.maxHeight - (_cachedAvailableHeight! + 64))
+                            .abs() >
+                        10;
+
                 if (needsRelayout && !_isLoading && _words.isNotEmpty) {
                   // Schedule relayout after this frame
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (mounted) _layoutCurrentPage();
                   });
                 }
-                
+
                 return GestureDetector(
                   key: _contentKey,
                   onTapUp: (details) {
@@ -399,8 +413,8 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                             ),
                           )
                         : _currentPage == null
-                            ? const Center(child: Text('No content available'))
-                            : _buildPageContent(settings),
+                        ? const Center(child: Text('No content available'))
+                        : _buildPageContent(settings),
                   ),
                 );
               },
@@ -450,40 +464,38 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
     if (_currentPage == null) {
       return const Center(child: Text('No content'));
     }
-    
+
     final page = _currentPage!;
-    final textStyle = TextStyle(
-      fontSize: settings.traditionalFontSize,
-      color: settings.textColor,
-      fontFamily: settings.fontFamily,
-      height: settings.lineHeight,
-    );
+    // Use the cached text style that was used to Calculate this page.
+    // This prevents "Old Content + New Style = Overflow" glitches while re-layout is in progress.
+    final textStyle =
+        _cachedTextStyle ??
+        TextStyle(
+          fontSize: settings.traditionalFontSize,
+          color: settings.textColor,
+          fontFamily: settings.fontFamily,
+          height: settings.lineHeight,
+        );
 
     // Build columns with proper spacing
     final List<Widget> columnWidgets = [];
     for (int i = 0; i < page.columns.length; i++) {
       final columnLines = page.columns[i];
-      
+
       // Add the column content
       columnWidgets.add(
         Expanded(
           child: ClipRect(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.max, // Changed from min to max to fill available height
-              children: columnLines.map((line) {
-                return Text(
-                  line,
-                  style: textStyle,
-                  textAlign: TextAlign.left,
-                  overflow: TextOverflow.clip,
-                );
-              }).toList(),
+            child: Text(
+              columnLines.join('\n'),
+              style: textStyle,
+              textAlign: TextAlign.left,
+              overflow: TextOverflow.clip,
             ),
           ),
         ),
       );
-      
+
       // Add gap between columns (but not after the last column)
       if (i < page.columns.length - 1) {
         columnWidgets.add(SizedBox(width: settings.columnGap));
@@ -493,7 +505,8 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
     return Padding(
       padding: const EdgeInsets.all(32.0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch, // Changed from start to stretch
+        crossAxisAlignment:
+            CrossAxisAlignment.stretch, // Changed from start to stretch
         children: columnWidgets,
       ),
     );
@@ -516,7 +529,9 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                   min: 12,
                   max: 72,
                   divisions: 60,
-                  label: provider.settings.traditionalFontSize.toStringAsFixed(0),
+                  label: provider.settings.traditionalFontSize.toStringAsFixed(
+                    0,
+                  ),
                   onChanged: (value) {
                     provider.updateTraditionalFontSize(value);
                     // Re-layout current page with new settings
@@ -535,7 +550,9 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                   label: provider.settings.numberOfColumns.toString(),
                   onChanged: (value) {
                     provider.updateSettings(
-                      provider.settings.copyWith(numberOfColumns: value.toInt()),
+                      provider.settings.copyWith(
+                        numberOfColumns: value.toInt(),
+                      ),
                     );
                     // Re-layout current page with new settings
                     _relayoutPage();
@@ -586,7 +603,8 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                   children: [
                     ChoiceChip(
                       label: const Text('Light'),
-                      selected: provider.settings.backgroundColor == Colors.white,
+                      selected:
+                          provider.settings.backgroundColor == Colors.white,
                       onSelected: (selected) {
                         if (selected) {
                           provider.updateColors(
@@ -598,7 +616,8 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                     ),
                     ChoiceChip(
                       label: const Text('Dark'),
-                      selected: provider.settings.backgroundColor == Colors.black,
+                      selected:
+                          provider.settings.backgroundColor == Colors.black,
                       onSelected: (selected) {
                         if (selected) {
                           provider.updateColors(
@@ -610,7 +629,9 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                     ),
                     ChoiceChip(
                       label: const Text('Sepia'),
-                      selected: provider.settings.backgroundColor == const Color(0xFFF4ECD8),
+                      selected:
+                          provider.settings.backgroundColor ==
+                          const Color(0xFFF4ECD8),
                       onSelected: (selected) {
                         if (selected) {
                           provider.updateColors(

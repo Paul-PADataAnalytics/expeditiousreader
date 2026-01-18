@@ -29,10 +29,7 @@ class MyApp extends StatelessWidget {
                 brightness: Brightness.light,
               ),
               useMaterial3: true,
-              appBarTheme: const AppBarTheme(
-                centerTitle: false,
-                elevation: 2,
-              ),
+              appBarTheme: const AppBarTheme(centerTitle: false, elevation: 2),
             ),
             darkTheme: ThemeData(
               colorScheme: ColorScheme.fromSeed(
@@ -40,13 +37,11 @@ class MyApp extends StatelessWidget {
                 brightness: Brightness.dark,
               ),
               useMaterial3: true,
-              appBarTheme: const AppBarTheme(
-                centerTitle: false,
-                elevation: 2,
-              ),
+              appBarTheme: const AppBarTheme(centerTitle: false, elevation: 2),
             ),
             themeMode: settingsProvider.settings.themeMode,
             home: const MainScreen(),
+            // home: const MeasurementCheckScreen(),
             debugShowCheckedModeBanner: false,
           );
         },
@@ -66,10 +61,7 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   bool _isInitialized = false;
 
-  final List<Widget> _screens = [
-    const LibraryScreen(),
-    const SettingsScreen(),
-  ];
+  final List<Widget> _screens = [const LibraryScreen(), const SettingsScreen()];
 
   @override
   void initState() {
@@ -97,18 +89,11 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_isInitialized) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _screens,
-      ),
+      body: IndexedStack(index: _selectedIndex, children: _screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
@@ -121,10 +106,7 @@ class _MainScreenState extends State<MainScreen> {
             icon: Icon(Icons.library_books),
             label: 'Library',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
+          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
