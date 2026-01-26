@@ -15,19 +15,46 @@ permissions:
   contents: write
 
 jobs:
+  # Create tag when manually triggered
+  create-tag:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.create_tag.outputs.tag_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Create and push tag
+        id: create_tag
+        run: |
+          TAG_NAME="v${{ github.event.inputs.version }}"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+          git push origin "$TAG_NAME"
+
   # Call the existing build workflows
   build-windows:
+    needs: [create-tag]
+    if: always() && (needs.create-tag.result == 'success' || needs.create-tag.result == 'skipped')
     uses: ./.github/workflows/build-windows.yml
     
   build-android:
+    needs: [create-tag]
+    if: always() && (needs.create-tag.result == 'success' || needs.create-tag.result == 'skipped')
     uses: ./.github/workflows/build-android.yml
     
   build-linux:
+    needs: [create-tag]
+    if: always() && (needs.create-tag.result == 'success' || needs.create-tag.result == 'skipped')
     uses: ./.github/workflows/build-appimage.yml
 
   # Collect all artifacts and create the release
   create-release:
-    needs: [build-windows, build-android, build-linux]
+    needs: [create-tag, build-windows, build-android, build-linux]
+    if: always() && needs.build-windows.result == 'success' && needs.build-android.result == 'success' && needs.build-linux.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -38,6 +65,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && needs.create-tag.outputs.tag_name || github.ref_name }}
           files: |
             artifacts/windows-build/expeditiousreader-windows-x64.zip
             artifacts/android-apk/app-release.apk
