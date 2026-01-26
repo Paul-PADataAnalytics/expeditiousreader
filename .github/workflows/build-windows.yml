@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+  workflow_call:  # Allow this workflow to be called by other workflows
 
 jobs:
   build:
@@ -39,9 +40,15 @@ jobs:
     - name: Build Windows app
       run: flutter build windows --release
       
+    - name: Create ZIP package
+      run: |
+        cd build/windows/x64/runner/Release
+        Compress-Archive -Path * -DestinationPath ../../../../../expeditiousreader-windows-x64.zip
+        cd ../../../../../
+      
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
       with:
         name: windows-build
-        path: build/windows/x64/runner/Release/
+        path: expeditiousreader-windows-x64.zip
         retention-days: 30
