@@ -42,11 +42,18 @@ jobs:
         mkdir -p AppDir/usr/bin
         mkdir -p AppDir/usr/lib
         mkdir -p AppDir/usr/share/applications
+        mkdir -p AppDir/usr/share/icons/hicolor/64x64/apps
+        mkdir -p AppDir/usr/share/icons/hicolor/128x128/apps
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
         
-    - name: Copy build files to AppDir
+    - name: Copy build files and icons to AppDir
       run: |
         cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
+        cp icons/64x64.png AppDir/usr/share/icons/hicolor/64x64/apps/expeditiousreader.png
+        cp icons/128x128.png AppDir/usr/share/icons/hicolor/128x128/apps/expeditiousreader.png
+        cp icons/256x256.png AppDir/usr/share/icons/hicolor/256x256/apps/expeditiousreader.png
+        # Also copy 256x256 as root icon for AppImage
+        cp icons/256x256.png AppDir/expeditiousreader.png
         
     - name: Create desktop file
       run: |

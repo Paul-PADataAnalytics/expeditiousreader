@@ -1,11 +1,11 @@
 {
-    "name": "expeditiousreader",
-    "short_name": "expeditiousreader",
+    "name": "Expeditious Reader",
+    "short_name": "Reader",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#2196F3",
+    "description": "A fast and efficient e-book reader with traditional pagination and speed reading modes.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

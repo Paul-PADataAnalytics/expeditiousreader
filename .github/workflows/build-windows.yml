@@ -24,6 +24,12 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
       
+    - name: Prepare Windows icon
+      run: |
+        choco install imagemagick -y
+        mkdir -p windows/runner/resources
+        magick convert icons/64x64.png icons/128x128.png icons/256x256.png windows/runner/resources/app_icon.ico
+      
     - name: Build Windows app
       run: flutter build windows --release
       

@@ -33,6 +33,15 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
       
+    - name: Prepare web icons
+      run: |
+        sudo apt-get install -y imagemagick
+        cp icons/64x64.png web/favicon.png
+        cp icons/128x128.png web/icons/Icon-192.png
+        cp icons/256x256.png web/icons/Icon-512.png
+        convert icons/128x128.png -gravity center -background white -extent 192x192 web/icons/Icon-maskable-192.png
+        convert icons/256x256.png -gravity center -background white -extent 512x512 web/icons/Icon-maskable-512.png
+      
     - name: Build web app
       run: flutter build web --release --base-href "/expeditiousreader/"
       
