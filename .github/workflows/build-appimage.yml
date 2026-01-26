@@ -1,0 +1,85 @@
+name: Build Linux AppImage
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+        
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        
+    - name: Install dependencies
+      run: flutter pub get
+      
+    - name: Build Linux app
+      run: flutter build linux --release
+      
+    - name: Download AppImage tool
+      run: |
+        wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+        chmod +x appimagetool-x86_64.AppImage
+        
+    - name: Create AppImage directory structure
+      run: |
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/lib
+        mkdir -p AppDir/usr/share/applications
+        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+        
+    - name: Copy build files to AppDir
+      run: |
+        cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
+        
+    - name: Create desktop file
+      run: |
+        cat > AppDir/usr/share/applications/expeditiousreader.desktop << EOF
+        [Desktop Entry]
+        Name=Expeditious Reader
+        Exec=expeditiousreader
+        Icon=expeditiousreader
+        Type=Application
+        Categories=Office;
+        EOF
+        
+    - name: Create AppRun script
+      run: |
+        cat > AppDir/AppRun << EOF
+        #!/bin/bash
+        SELF=\$(readlink -f "\$0")
+        HERE=\${SELF%/*}
+        export PATH="\${HERE}/usr/bin/:\${PATH}"
+        export LD_LIBRARY_PATH="\${HERE}/usr/lib/:\${LD_LIBRARY_PATH}"
+        exec "\${HERE}/usr/bin/expeditiousreader" "\$@"
+        EOF
+        chmod +x AppDir/AppRun
+        
+    - name: Create AppImage
+      run: |
+        ./appimagetool-x86_64.AppImage AppDir expeditiousreader-x86_64.AppImage
+      env:
+        ARCH: x86_64
+        
+    - name: Upload AppImage artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-appimage
+        path: expeditiousreader-x86_64.AppImage
+        retention-days: 30
