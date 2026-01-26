@@ -58,6 +58,7 @@ jobs:
         Type=Application
         Categories=Office;
         EOF
+        ln -s usr/share/applications/expeditiousreader.desktop AppDir/expeditiousreader.desktop
         
     - name: Create AppRun script
       run: |
