@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'providers/library_provider.dart';
 import 'providers/settings_provider.dart';
@@ -23,6 +24,22 @@ class MyApp extends StatelessWidget {
         builder: (context, settingsProvider, child) {
           return MaterialApp(
             title: 'Expeditious Reader',
+            builder: (context, child) {
+              final mediaQuery = MediaQuery.of(context);
+              // Scale on Android and iOS, disable scaling on Desktop/Web
+              final shouldScale =
+                  defaultTargetPlatform == TargetPlatform.android ||
+                  defaultTargetPlatform == TargetPlatform.iOS;
+
+              if (shouldScale) {
+                return child!;
+              }
+
+              return MediaQuery(
+                data: mediaQuery.copyWith(textScaler: TextScaler.noScaling),
+                child: child!,
+              );
+            },
             theme: ThemeData(
               colorScheme: ColorScheme.fromSeed(
                 seedColor: Colors.blue,

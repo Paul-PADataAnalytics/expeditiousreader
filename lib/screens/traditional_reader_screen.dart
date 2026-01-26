@@ -123,8 +123,10 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
     // Cache layout parameters
     _cachedAvailableWidth = availableWidth;
     _cachedAvailableHeight = availableHeight;
+    // Bake text scaling into font size to ensure calculation and rendering match
+    final textScaleFactor = MediaQuery.of(context).textScaler.scale(1.0);
     _cachedTextStyle = TextStyle(
-      fontSize: settings.traditionalFontSize,
+      fontSize: settings.traditionalFontSize * textScaleFactor,
       color: settings.textColor,
       fontFamily: settings.fontFamily,
       height: settings.lineHeight,
@@ -164,7 +166,7 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
         maxPages: 1, // Only calculate one page
         startWordIndex: startWordIndex,
         preProcessedWords: _words,
-        textScaler: MediaQuery.of(context).textScaler,
+        textScaler: TextScaler.noScaling, // Scaling is baked into fontSize
       );
     });
 
@@ -491,6 +493,8 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
               style: textStyle,
               textAlign: TextAlign.left,
               overflow: TextOverflow.clip,
+              textScaler:
+                  TextScaler.noScaling, // Critical: prevents double-scaling
             ),
           ),
         ),

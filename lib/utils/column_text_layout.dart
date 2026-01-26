@@ -97,8 +97,19 @@ class ColumnTextLayout {
     // Calculate column width - gaps are subtracted, padding handled by widget tree
     final totalGapWidth = columnGap * (numberOfColumns - 1);
     final columnWidth = (availableWidth - totalGapWidth) / numberOfColumns;
-    // Safety margin to prevent bottom clipping
-    final contentHeight = availableHeight - 2.0;
+    // More aggressive safety margin accounting for text scale and line height
+    final textScaleFactor = textScaler.scale(1.0);
+    // Base margin of 8px, scaled by text factor, plus an additional line's worth of safety
+    final estimatedLineHeight =
+        textStyle.fontSize! * (textStyle.height ?? 1.0) * textScaleFactor;
+    final safetyMargin = (8.0 * textScaleFactor) + (estimatedLineHeight * 0.5);
+    final contentHeight = availableHeight - safetyMargin;
+
+    debugLog(
+      'Layout params: textScale=$textScaleFactor, fontSize=${textStyle.fontSize}, '
+      'lineHeight=${textStyle.height}, estimatedLineHeight=$estimatedLineHeight, '
+      'safetyMargin=$safetyMargin, availableHeight=$availableHeight, contentHeight=$contentHeight',
+    );
 
     /*
       PARAGRAPH-BASED LAYOUT STRATEGY:
@@ -147,11 +158,24 @@ class ColumnTextLayout {
       int linesThatFit = 0;
 
       for (final line in lines) {
-        if (occupiedHeight + line.height > contentHeight) {
+        if (occupiedHeight + line.height >= contentHeight) {
           break;
         }
         occupiedHeight += line.height;
         linesThatFit++;
+      }
+
+      debugLog(
+        'Column $currentColumnIndex: total lines=${lines.length}, fit=$linesThatFit, '
+        'occupiedHeight=$occupiedHeight, contentHeight=$contentHeight',
+      );
+
+      // Universal: Reduce line count by 1 for extra safety across all platforms
+      // This accounts for subtle rendering differences and estimation errors
+      if (linesThatFit > 1) {
+        // Keep at least 1 line
+        linesThatFit--;
+        debugLog('Reduced linesThatFit to $linesThatFit for safety');
       }
 
       // 4. Extract Content for this Column
@@ -179,10 +203,11 @@ class ColumnTextLayout {
 
         // The character index where this line ends (exclusive) is technically hard to get directly from metrics.
         // We use getPositionForOffset to find the end of the line.
-        // Offset: rightmost edge (columnWidth), bottom of the line.
+        // Offset: rightmost edge (columnWidth - 4 for safety), bottom of the line.
         final endPos = textPainter.getPositionForOffset(
           Offset(
-            columnWidth,
+            columnWidth -
+                4.0, // More conservative offset to prevent horizontal overflow
             lastLineMetrics.baseline + lastLineMetrics.descent,
           ),
         );
