@@ -23,11 +23,17 @@ jobs:
         
     - name: Install dependencies
       run: flutter pub get
-      
+    
+    - name: Ensure resources directory exists
+      run: |
+        if not exist windows\runner\resources (
+          mkdir windows\runner\resources
+        )
+      shell: cmd
+
     - name: Prepare Windows icon
       run: |
         choco install imagemagick -y
-        mkdir -p windows/runner/resources
         magick convert icons/64x64.png icons/128x128.png icons/256x256.png windows/runner/resources/app_icon.ico
       
     - name: Build Windows app
