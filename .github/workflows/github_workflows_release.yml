@@ -1,0 +1,201 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Triggers on version tags like v1.0.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.7'
+          channel: 'stable'
+          
+      - name: Install dependencies
+        run: flutter pub get
+        
+      - name: Prepare Windows icon
+        run: |
+          choco install imagemagick -y
+          mkdir -p windows/runner/resources
+          magick convert icons/64x64.png icons/128x128.png icons/256x256.png windows/runner/resources/app_icon.ico
+        
+      - name: Build Windows app
+        run: flutter build windows --release
+        
+      - name: Create Windows ZIP
+        run: |
+          cd build/windows/x64/runner/Release
+          Compress-Archive -Path * -DestinationPath ../../../../../expeditiousreader-windows-x64.zip
+        
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: expeditiousreader-windows-x64.zip
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.7'
+          channel: 'stable'
+          
+      - name: Install dependencies
+        run: flutter pub get
+        
+      - name: Prepare Android icons
+        run: |
+          sudo apt-get install -y imagemagick
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          convert icons/64x64.png -resize 48x48 android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          convert icons/64x64.png -resize 72x72 android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          convert icons/128x128.png -resize 96x96 android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          convert icons/128x128.png -resize 144x144 android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          convert icons/256x256.png -resize 192x192 android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+        
+      - name: Build APK
+        run: flutter build apk --release
+        
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/app-release.apk expeditiousreader-android.apk
+        
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: expeditiousreader-android.apk
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+          
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.7'
+          channel: 'stable'
+          
+      - name: Install dependencies
+        run: flutter pub get
+        
+      - name: Build Linux app
+        run: flutter build linux --release
+        
+      - name: Download AppImage tool
+        run: |
+          wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          
+      - name: Create AppImage directory structure
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/lib
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/64x64/apps
+          mkdir -p AppDir/usr/share/icons/hicolor/128x128/apps
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          
+      - name: Copy build files and icons to AppDir
+        run: |
+          cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
+          cp icons/64x64.png AppDir/usr/share/icons/hicolor/64x64/apps/expeditiousreader.png
+          cp icons/128x128.png AppDir/usr/share/icons/hicolor/128x128/apps/expeditiousreader.png
+          cp icons/256x256.png AppDir/usr/share/icons/hicolor/256x256/apps/expeditiousreader.png
+          cp icons/256x256.png AppDir/expeditiousreader.png
+          
+      - name: Create desktop file
+        run: |
+          cat > AppDir/usr/share/applications/expeditiousreader.desktop << EOF
+          [Desktop Entry]
+          Name=Expeditious Reader
+          Exec=expeditiousreader
+          Icon=expeditiousreader
+          Type=Application
+          Categories=Office;
+          EOF
+          ln -s usr/share/applications/expeditiousreader.desktop AppDir/expeditiousreader.desktop
+          
+      - name: Create AppRun script
+        run: |
+          cat > AppDir/AppRun << EOF
+          #!/bin/bash
+          SELF=\$(readlink -f "\$0")
+          HERE=\${SELF%/*}
+          export PATH="\${HERE}/usr/bin/:\${PATH}"
+          export LD_LIBRARY_PATH="\${HERE}/usr/lib/:\${LD_LIBRARY_PATH}"
+          exec "\${HERE}/usr/bin/expeditiousreader" "\$@"
+          EOF
+          chmod +x AppDir/AppRun
+          
+      - name: Create AppImage
+        run: |
+          ./appimagetool-x86_64.AppImage AppDir expeditiousreader-x86_64.AppImage
+        env:
+          ARCH: x86_64
+          
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: expeditiousreader-x86_64.AppImage
+
+  create-release:
+    needs: [build-windows, build-android, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/windows-release/expeditiousreader-windows-x64.zip
+            artifacts/android-release/expeditiousreader-android.apk
+            artifacts/linux-release/expeditiousreader-x86_64.AppImage
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
