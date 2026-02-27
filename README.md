@@ -2,6 +2,8 @@
 
 A cross-platform speed reading and ebook management application built with Flutter.
 
+Try it out at https://paul-padataanalytics.github.io/expeditiousreader/
+
 ## Features
 
 ### Speed Reading Mode
