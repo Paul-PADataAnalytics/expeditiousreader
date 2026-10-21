@@ -116,6 +116,8 @@ class CatalogueService {
   static String normalizeServerUrl(String raw) {
     var cleaned = raw.trim().replaceAll(RegExp(r'/+$'), '');
     if (cleaned.isEmpty) return '';
+    // Strip common endpoint suffixes if a user pasted /api, /kindle, or /app
+    cleaned = cleaned.replaceAll(RegExp(r'/(?:api|kindle|app)$', caseSensitive: false), '');
     if (!cleaned.startsWith('http://') && !cleaned.startsWith('https://')) {
       cleaned = 'http://$cleaned';
     }
