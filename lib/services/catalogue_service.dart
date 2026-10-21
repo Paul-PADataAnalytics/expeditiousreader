@@ -110,14 +110,30 @@ class CatalogueService {
   bool _lastKnownAvailable = false;
   bool get lastKnownAvailable => _lastKnownAvailable;
 
+  bool _apkAvailable = false;
+  bool get apkAvailable => _apkAvailable;
+
+  static String normalizeServerUrl(String raw) {
+    var cleaned = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    if (cleaned.isEmpty) return '';
+    if (!cleaned.startsWith('http://') && !cleaned.startsWith('https://')) {
+      cleaned = 'http://$cleaned';
+    }
+    final uri = Uri.tryParse(cleaned);
+    if (uri != null && !uri.hasPort && uri.scheme == 'http') {
+      cleaned = 'http://${uri.host}:8000${uri.path}';
+    }
+    return cleaned.replaceAll(RegExp(r'/+$'), '');
+  }
+
   Future<String> getServerUrl() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_serverUrlPrefKey);
     if (saved != null && saved.trim().isNotEmpty) {
-      return saved.trim().replaceAll(RegExp(r'/+$'), '');
+      return normalizeServerUrl(saved);
     }
     if (_envServerUrl.trim().isNotEmpty) {
-      return _envServerUrl.trim().replaceAll(RegExp(r'/+$'), '');
+      return normalizeServerUrl(_envServerUrl);
     }
     if (kIsWeb) {
       final origin = Uri.base.origin;
@@ -130,12 +146,17 @@ class CatalogueService {
 
   Future<void> setServerUrl(String url) async {
     final prefs = await SharedPreferences.getInstance();
-    final cleaned = url.trim().replaceAll(RegExp(r'/+$'), '');
+    final cleaned = normalizeServerUrl(url);
     if (cleaned.isEmpty) {
       await prefs.remove(_serverUrlPrefKey);
     } else {
       await prefs.setString(_serverUrlPrefKey, cleaned);
     }
+  }
+
+  Future<String> getApkDownloadUrl() async {
+    final baseUrl = await getServerUrl();
+    return '$baseUrl/download/expeditiousreader.apk';
   }
 
   /// Probe whether a Catalogue backend is reachable at the configured URL.
@@ -150,6 +171,7 @@ class CatalogueService {
         final data = json.decode(utf8.decode(response.bodyBytes));
         if (data is Map<String, dynamic> && data.containsKey('files')) {
           _lastKnownAvailable = true;
+          _apkAvailable = data['apk_available'] == true;
           return true;
         }
       }
@@ -157,6 +179,7 @@ class CatalogueService {
       // Offline or standalone deployment without a Catalogue server
     }
     _lastKnownAvailable = false;
+    _apkAvailable = false;
     return false;
   }
 

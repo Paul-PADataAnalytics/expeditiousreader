@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/book.dart';
 import '../providers/library_provider.dart';
@@ -201,6 +202,54 @@ class _CatalogueBrowserScreenState extends State<CatalogueBrowserScreen> {
       await context.read<LibraryProvider>().updateCatalogueServerUrl(updated);
       await _initCatalogue();
     }
+  }
+
+  Future<void> _showAndroidApkDialog() async {
+    final apkUrl = await _catalogueService.getApkDownloadUrl();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.android, color: Colors.green),
+            SizedBox(width: 8),
+            Text('Download Android App (.APK)'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Open this URL in your Android browser (or visit the Server Portal at /kindle) to download and install Expeditious Reader:',
+            ),
+            const SizedBox(height: 12),
+            SelectableText(
+              apkUrl,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Copy Link'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: apkUrl));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Copied $apkUrl to clipboard')),
+              );
+            },
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _importAndOpenBook(CatalogueItem item, {String? mode}) async {
@@ -503,6 +552,11 @@ class _CatalogueBrowserScreenState extends State<CatalogueBrowserScreen> {
       appBar: AppBar(
         title: Text('Library Catalogue ($_totalCount matching)'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.android),
+            tooltip: 'Download Android App (.APK)',
+            onPressed: _showAndroidApkDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.dns),
             tooltip: 'Catalogue Server URL ($_serverUrl)',
