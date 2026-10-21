@@ -67,10 +67,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: TextField(
               decoration: const InputDecoration(
-                hintText: 'Search by title or author...',
+                hintText: 'Search library by title, author, subject, or topic...',
                 prefixIcon: Icon(Icons.search),
                 border: OutlineInputBorder(),
               ),
@@ -78,6 +78,112 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 context.read<LibraryProvider>().setSearchQuery(value);
               },
             ),
+          ),
+          Consumer<LibraryProvider>(
+            builder: (context, provider, _) {
+              if (provider.totalBookCount == 0) {
+                return const SizedBox.shrink();
+              }
+              final nonFictionCount = provider.countForCategory('Non-Fiction');
+              final fictionCount = provider.countForCategory('Fiction');
+              final subjects = provider.availableSubjects;
+              final topics = provider.availableTopics;
+              final hasFilter = provider.selectedBookCategory != null ||
+                  provider.selectedSubject != null ||
+                  provider.selectedTopic != null;
+
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        ChoiceChip(
+                          label: Text('All (${provider.totalBookCount})'),
+                          selected: provider.selectedBookCategory == null,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) => provider.setBookCategoryFilter(null),
+                        ),
+                        ChoiceChip(
+                          label: Text('Non-Fiction ($nonFictionCount)'),
+                          selected: provider.selectedBookCategory == 'Non-Fiction',
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (s) =>
+                              provider.setBookCategoryFilter(s ? 'Non-Fiction' : null),
+                        ),
+                        ChoiceChip(
+                          label: Text('Fiction ($fictionCount)'),
+                          selected: provider.selectedBookCategory == 'Fiction',
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (s) =>
+                              provider.setBookCategoryFilter(s ? 'Fiction' : null),
+                        ),
+                        if (hasFilter)
+                          TextButton.icon(
+                            icon: const Icon(Icons.filter_alt_off, size: 16),
+                            label: const Text('Clear Filters'),
+                            onPressed: provider.clearFilters,
+                          ),
+                      ],
+                    ),
+                    if (subjects.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        height: 32,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: subjects.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 6),
+                          itemBuilder: (context, idx) {
+                            final entry = subjects[idx];
+                            final selected = provider.selectedSubject == entry.key;
+                            return FilterChip(
+                              label: Text(
+                                '${entry.key} (${entry.value})',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              selected: selected,
+                              visualDensity: VisualDensity.compact,
+                              onSelected: (s) =>
+                                  provider.setSubjectFilter(s ? entry.key : null),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                    if (topics.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      SizedBox(
+                        height: 30,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: topics.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 6),
+                          itemBuilder: (context, idx) {
+                            final entry = topics[idx];
+                            final selected = provider.selectedTopic == entry.key;
+                            return FilterChip(
+                              label: Text(
+                                '${entry.key} (${entry.value})',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              selected: selected,
+                              visualDensity: VisualDensity.compact,
+                              onSelected: (s) =>
+                                  provider.setTopicFilter(s ? entry.key : null),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
           ),
           Expanded(
             child: Consumer<LibraryProvider>(
@@ -227,6 +333,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                       style: const TextStyle(
                                         color: Colors.grey,
                                         fontSize: 12,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${book.bookCategory} • ${book.bookSubject}',
+                                      style: TextStyle(
+                                        color: Colors.blueGrey[600],
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w500,
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,

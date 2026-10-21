@@ -15,6 +15,8 @@ class CatalogueItem {
   final String isbn;
   final String coverUrl;
   final int readingProgress;
+  final String category;
+  final String subject;
   final String collectionName;
   final String fileFormat;
   final String fileExtension;
@@ -32,6 +34,8 @@ class CatalogueItem {
     required this.isbn,
     required this.coverUrl,
     required this.readingProgress,
+    this.category = 'Non-Fiction',
+    this.subject = 'Programming & Software Engineering',
     required this.collectionName,
     required this.fileFormat,
     required this.fileExtension,
@@ -70,6 +74,8 @@ class CatalogueItem {
       isbn: json['isbn']?.toString() ?? '',
       coverUrl: json['cover_url']?.toString() ?? '',
       readingProgress: (json['reading_progress'] as num?)?.toInt() ?? 0,
+      category: json['category']?.toString() ?? 'Non-Fiction',
+      subject: json['subject']?.toString() ?? 'Programming & Software Engineering',
       collectionName: collection?['name']?.toString() ?? 'Unknown',
       fileFormat: ext.isEmpty ? 'epub' : ext,
       fileExtension: filetype?['filetypeextension']?.toString() ?? '.epub',
@@ -156,6 +162,9 @@ class CatalogueService {
 
   Future<Map<String, dynamic>> fetchFiles({
     String query = '',
+    String? category,
+    String? subject,
+    String? topic,
     int? collectionId,
     int? topicId,
     int limit = 60,
@@ -168,6 +177,15 @@ class CatalogueService {
     };
     if (query.trim().isNotEmpty) {
       queryParams['q'] = query.trim();
+    }
+    if (category != null && category.trim().isNotEmpty) {
+      queryParams['category'] = category.trim();
+    }
+    if (subject != null && subject.trim().isNotEmpty) {
+      queryParams['subject'] = subject.trim();
+    }
+    if (topic != null && topic.trim().isNotEmpty) {
+      queryParams['topic'] = topic.trim();
     }
     if (collectionId != null) {
       queryParams['collection_id'] = collectionId.toString();
@@ -190,6 +208,17 @@ class CatalogueService {
           .map((e) => CatalogueItem.fromJson(e as Map<String, dynamic>))
           .toList(),
     };
+  }
+
+  Future<Map<String, dynamic>> fetchTaxonomy() async {
+    final baseUrl = await getServerUrl();
+    final response = await http
+        .get(Uri.parse('$baseUrl/api/taxonomy'))
+        .timeout(const Duration(seconds: 5));
+    if (response.statusCode != 200) {
+      return {'total_books': 0, 'categories': [], 'subjects': [], 'topics': []};
+    }
+    return json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
   }
 
   Future<List<Map<String, dynamic>>> fetchCollections() async {

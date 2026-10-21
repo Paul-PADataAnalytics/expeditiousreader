@@ -11,7 +11,53 @@ class LibraryProvider extends ChangeNotifier {
   bool _isCatalogueAvailable = false;
   String _catalogueServerUrl = CatalogueService.defaultHostUrl;
   String _searchQuery = '';
+  String? _selectedBookCategory; // 'Fiction' or 'Non-Fiction'
+  String? _selectedSubject;
+  String? _selectedTopic;
   List<String> _selectedCategories = [];
+
+  int get totalBookCount => _books.length;
+  String? get selectedBookCategory => _selectedBookCategory;
+  String? get selectedSubject => _selectedSubject;
+  String? get selectedTopic => _selectedTopic;
+
+  int countForCategory(String category) {
+    return _books.where((b) => b.bookCategory == category).length;
+  }
+
+  List<MapEntry<String, int>> get availableSubjects {
+    final counts = <String, int>{};
+    for (final b in _books) {
+      if (_selectedBookCategory != null && b.bookCategory != _selectedBookCategory) {
+        continue;
+      }
+      final subj = b.bookSubject;
+      if (subj.isNotEmpty) {
+        counts[subj] = (counts[subj] ?? 0) + 1;
+      }
+    }
+    final entries = counts.entries.toList()
+      ..sort((a, b) => b.value != a.value ? b.value.compareTo(a.value) : a.key.compareTo(b.key));
+    return entries;
+  }
+
+  List<MapEntry<String, int>> get availableTopics {
+    final counts = <String, int>{};
+    for (final b in _books) {
+      if (_selectedBookCategory != null && b.bookCategory != _selectedBookCategory) {
+        continue;
+      }
+      if (_selectedSubject != null && b.bookSubject != _selectedSubject) {
+        continue;
+      }
+      for (final t in b.bookTopics) {
+        counts[t] = (counts[t] ?? 0) + 1;
+      }
+    }
+    final entries = counts.entries.toList()
+      ..sort((a, b) => b.value != a.value ? b.value.compareTo(a.value) : a.key.compareTo(b.key));
+    return entries;
+  }
 
   List<Book> get books {
     var filtered = _books;
@@ -21,11 +67,28 @@ class LibraryProvider extends ChangeNotifier {
       filtered = filtered.where((book) {
         final query = _searchQuery.toLowerCase();
         return book.title.toLowerCase().contains(query) ||
-            book.author.toLowerCase().contains(query);
+            book.author.toLowerCase().contains(query) ||
+            book.bookSubject.toLowerCase().contains(query) ||
+            book.bookTopics.any((t) => t.toLowerCase().contains(query));
       }).toList();
     }
 
-    // Apply category filter
+    // Apply Fiction / Non-Fiction filter
+    if (_selectedBookCategory != null) {
+      filtered = filtered.where((book) => book.bookCategory == _selectedBookCategory).toList();
+    }
+
+    // Apply Subject Shelf filter
+    if (_selectedSubject != null) {
+      filtered = filtered.where((book) => book.bookSubject == _selectedSubject).toList();
+    }
+
+    // Apply Topic filter
+    if (_selectedTopic != null) {
+      filtered = filtered.where((book) => book.bookTopics.contains(_selectedTopic)).toList();
+    }
+
+    // Apply legacy multi-category filter if set
     if (_selectedCategories.isNotEmpty) {
       filtered = filtered.where((book) {
         return book.categories.any((cat) => _selectedCategories.contains(cat));
@@ -176,13 +239,18 @@ class LibraryProvider extends ChangeNotifier {
 
     final result = await _libraryService.importBookFromBytes(bytes, item.fileName);
     final parsedBook = result['book'] as Book;
+    final combinedTags = <String>[
+      item.category,
+      item.subject,
+      ...item.topics,
+    ];
     final enriched = parsedBook.copyWith(
       title: item.title.isNotEmpty ? item.title : parsedBook.title,
       author: item.displayAuthor != 'Unknown Author' ? item.displayAuthor : parsedBook.author,
       isbn: item.isbn.isNotEmpty ? item.isbn : parsedBook.isbn,
       publicationDate: item.datecreated.isNotEmpty ? item.datecreated : parsedBook.publicationDate,
-      genre: item.collectionName != 'Unknown' ? item.collectionName : parsedBook.genre,
-      categories: item.topics.isNotEmpty ? item.topics : parsedBook.categories,
+      genre: '${item.category} • ${item.subject}',
+      categories: combinedTags,
       originalFilePath: 'catalogue:${item.id}',
       currentPosition: item.readingProgress > 0 ? item.readingProgress : parsedBook.currentPosition,
     );
@@ -247,6 +315,36 @@ class LibraryProvider extends ChangeNotifier {
   /// Set search query
   void setSearchQuery(String query) {
     _searchQuery = query;
+    notifyListeners();
+  }
+
+  /// Filter by Fiction / Non-Fiction category
+  void setBookCategoryFilter(String? category) {
+    _selectedBookCategory = category;
+    _selectedSubject = null;
+    _selectedTopic = null;
+    notifyListeners();
+  }
+
+  /// Filter by Subject Shelf
+  void setSubjectFilter(String? subject) {
+    _selectedSubject = subject;
+    _selectedTopic = null;
+    notifyListeners();
+  }
+
+  /// Filter by Topic
+  void setTopicFilter(String? topic) {
+    _selectedTopic = topic;
+    notifyListeners();
+  }
+
+  /// Clear all library filters
+  void clearFilters() {
+    _selectedBookCategory = null;
+    _selectedSubject = null;
+    _selectedTopic = null;
+    _selectedCategories = [];
     notifyListeners();
   }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:expeditiousreader/models/book.dart';
 import 'package:expeditiousreader/screens/library_screen.dart';
 import 'package:expeditiousreader/providers/library_provider.dart';
 import 'package:expeditiousreader/providers/settings_provider.dart';
@@ -145,5 +146,45 @@ $bodyWords
 
     expect(find.text('Library'), findsOneWidget);
     expect(find.byTooltip('Browse Server Catalogue'), findsOneWidget);
+  });
+
+  group('Book Library Taxonomy tests', () {
+    test('extracts category, subject, and clean topics from Catalogue-imported book', () {
+      final book = Book(
+        id: '1',
+        title: 'Linux Bible',
+        author: 'Christopher Negus',
+        genre: 'Non-Fiction • Linux, Cloud & DevOps',
+        pageCount: 500,
+        wordCount: 150000,
+        chapterPositions: const [0],
+        textFilePath: 'linux.txt',
+        originalFilePath: 'catalogue:1',
+        fileFormat: 'epub',
+        dateAdded: DateTime(2026, 1, 1),
+        categories: const ['Non-Fiction', 'Linux, Cloud & DevOps', 'Linux', 'Operating Systems'],
+      );
+
+      expect(book.bookCategory, 'Non-Fiction');
+      expect(book.bookSubject, 'Linux, Cloud & DevOps');
+      expect(book.bookTopics, ['Linux', 'Operating Systems']);
+    });
+
+    test('infers Fiction vs Non-Fiction and subject for locally imported books', () {
+      final sciFiBook = Book(
+        id: '2',
+        title: 'All Systems Red: The Murderbot Diaries',
+        author: 'Martha Wells',
+        pageCount: 160,
+        wordCount: 45000,
+        chapterPositions: const [0],
+        textFilePath: 'murderbot.txt',
+        originalFilePath: 'murderbot.epub',
+        fileFormat: 'epub',
+        dateAdded: DateTime(2026, 1, 1),
+      );
+      expect(sciFiBook.bookCategory, 'Fiction');
+      expect(sciFiBook.bookSubject, 'Science Fiction & Fantasy');
+    });
   });
 }
