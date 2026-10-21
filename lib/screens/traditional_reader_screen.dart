@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/book.dart';
+import '../models/reading_settings.dart';
 import '../providers/library_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/library_service.dart';
 import '../utils/column_text_layout.dart';
+import '../utils/text_processor.dart';
+import '../widgets/reader_shared_widgets.dart';
+import 'speed_reader_screen.dart';
 
 class TraditionalReaderScreen extends StatefulWidget {
   final Book book;
@@ -12,29 +16,29 @@ class TraditionalReaderScreen extends StatefulWidget {
   const TraditionalReaderScreen({super.key, required this.book});
 
   @override
-  State<TraditionalReaderScreen> createState() =>
-      _TraditionalReaderScreenState();
+  State<TraditionalReaderScreen> createState() => _TraditionalReaderScreenState();
 }
 
 class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
   final LibraryService _libraryService = LibraryService();
-  final GlobalKey _contentKey = GlobalKey();
 
-  // Lazy loading: cache pages by their starting word index
   final Map<int, ColumnPage> _pageCache = {};
   ColumnPage? _currentPage;
   int _currentWordPosition = 0;
 
+  List<RichWord> _richWords = [];
   List<String> _words = [];
+  List<int> _chapterWordPositions = [];
+  List<ChapterInfo> _chapters = [];
   bool _isLoading = true;
   final String _loadingMessage = 'Loading book...';
 
-  // Layout parameters (cached after first calculation)
-  double? _cachedAvailableWidth;
-  double? _cachedAvailableHeight;
+  double? _cachedViewportWidth;
+  double? _cachedViewportHeight;
+  double _horizontalPadding = 24.0;
+  double _verticalPadding = 16.0;
   TextStyle? _cachedTextStyle;
 
-  // Store provider reference to use in dispose
   LibraryProvider? _libraryProvider;
 
   @override
@@ -46,7 +50,6 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Get and store the provider reference when dependencies are available
     _libraryProvider ??= context.read<LibraryProvider>();
   }
 
@@ -59,129 +62,166 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
   Future<void> _loadBook() async {
     try {
       final text = await _libraryService.readBookText(widget.book);
+      _richWords = TextProcessor.parseRichWords(text);
+      _words = _richWords.map((rw) => rw.text).toList();
 
-      // For traditional reading, reflow text by removing all line breaks
-      // This allows proper column-based pagination
-      final reflowedText = text
-          .replaceAll('\r\n', ' ') // Windows line endings
-          .replaceAll('\n', ' ') // Unix line endings
-          .replaceAll('\r', ' ') // Old Mac line endings
-          .replaceAll('\t', ' ') // Tabs
-          .replaceAll(RegExp(r'\s+'), ' ') // Multiple spaces to single space
-          .trim();
+      if (_words.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
 
-      _words = reflowedText.split(' ');
-
-      // Set initial position from saved progress
-      _currentWordPosition = widget.book.currentPosition.clamp(
-        0,
-        _words.length - 1,
+      _chapterWordPositions = TextProcessor.normalizeChapterWordPositions(
+        widget.book.chapterPositions,
+        _words.length,
+        text.length,
       );
+      _chapters = TextProcessor.buildChapterInfoList(_richWords, _chapterWordPositions);
 
-      // Wait for first frame to get accurate dimensions
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _layoutCurrentPage();
-        }
+      int initialPosition = widget.book.currentPosition;
+      if (initialPosition <= 0) {
+        initialPosition = TextProcessor.findStartPosition(
+          text,
+          chapterPositions: _chapterWordPositions,
+        );
+      }
+
+      _currentWordPosition = initialPosition.clamp(0, _words.length - 1);
+
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
       });
+
+      if (_cachedViewportWidth != null && _cachedViewportHeight != null) {
+        await _layoutForViewport(_cachedViewportWidth!, _cachedViewportHeight!);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error loading book: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading book: $e')),
+      );
     }
   }
 
-  Future<void> _layoutCurrentPage() async {
-    final settings = context.read<SettingsProvider>().settings;
-    final renderBox =
-        _contentKey.currentContext?.findRenderObject() as RenderBox?;
+  void _switchToSpeedReader() {
+    _saveProgress();
+    final pos = _currentPage?.startWordIndex ?? _currentWordPosition;
+    final updatedBook = widget.book.copyWith(currentPosition: pos);
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SpeedReaderScreen(book: updatedBook),
+      ),
+    );
+  }
 
-    if (renderBox == null) {
-      // Try again on next frame
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _layoutCurrentPage();
-      });
-      return;
+  int _getCurrentChapter() {
+    if (_chapterWordPositions.isEmpty) return 1;
+    final pos = _currentPage?.startWordIndex ?? _currentWordPosition;
+    for (int i = _chapterWordPositions.length - 1; i >= 0; i--) {
+      if (pos >= _chapterWordPositions[i]) {
+        return i + 1;
+      }
     }
+    return 1;
+  }
 
-    final size = renderBox.size;
-
-    // Account for the padding that will be applied in the rendering
-    const padding = 32.0;
-    final availableWidth = size.width - (padding * 2);
-    final availableHeight = size.height - (padding * 2);
-
-    // ignore: avoid_print
-    print(
-      '[TraditionalReader] Layout: Screen=${size.width}x${size.height}, Available=${availableWidth}x$availableHeight, Padding=$padding',
+  void _showChaptersDialog() {
+    showChaptersModalDialog(
+      context: context,
+      chapters: _chapters,
+      currentChapter: _getCurrentChapter(),
+      totalWords: _words.length,
+      onChapterSelected: (ch) async {
+        final targetPos = ch.wordIndex.clamp(0, _words.length - 1);
+        final page = await _calculatePage(targetPos);
+        if (!mounted) return;
+        setState(() {
+          _currentPage = page;
+          _currentWordPosition = page.startWordIndex;
+        });
+        _saveProgress();
+      },
     );
+  }
 
-    // Cache layout parameters
-    _cachedAvailableWidth = availableWidth;
-    _cachedAvailableHeight = availableHeight;
-    // Bake text scaling into font size to ensure calculation and rendering match
+  TextStyle _buildEffectiveTextStyle(ReadingSettings settings) {
     final textScaleFactor = MediaQuery.of(context).textScaler.scale(1.0);
-    _cachedTextStyle = TextStyle(
-      fontSize: settings.traditionalFontSize * textScaleFactor,
-      color: settings.textColor,
-      fontFamily: settings.fontFamily,
-      height: settings.lineHeight,
+    return ColumnTextLayout.normalizeBaseStyle(
+      TextStyle(
+        fontSize: settings.traditionalFontSize * textScaleFactor,
+        color: settings.textColor,
+        fontFamily: settings.fontFamily,
+        height: settings.lineHeight,
+      ),
     );
+  }
 
-    // Calculate just the current page
-    final page = await _calculatePage(_currentWordPosition);
+  Future<void> _layoutForViewport(double maxWidth, double maxHeight) async {
+    if (_words.isEmpty || maxWidth <= 40 || maxHeight <= 40) return;
+
+    final settings = context.read<SettingsProvider>().settings;
+    _cachedViewportWidth = maxWidth;
+    _cachedViewportHeight = maxHeight;
+    _horizontalPadding = maxWidth < 600 ? 16.0 : 24.0;
+    _verticalPadding = maxHeight < 600 ? 10.0 : 16.0;
+    _cachedTextStyle = _buildEffectiveTextStyle(settings);
+    _pageCache.clear();
+
+    final anchorPos = _currentPage?.startWordIndex ?? _currentWordPosition;
+    final page = await _calculatePage(anchorPos);
 
     if (!mounted) return;
 
     setState(() {
       _currentPage = page;
-      _isLoading = false;
+      _currentWordPosition = page.startWordIndex;
     });
   }
 
-  /// Calculate a single page starting from the given word index
   Future<ColumnPage> _calculatePage(int startWordIndex) async {
-    // Check cache first
     if (_pageCache.containsKey(startWordIndex)) {
       return _pageCache[startWordIndex]!;
     }
 
     final settings = context.read<SettingsProvider>().settings;
+    final viewportWidth = _cachedViewportWidth ?? 800.0;
+    final viewportHeight = _cachedViewportHeight ?? 600.0;
+    final style = _cachedTextStyle ?? _buildEffectiveTextStyle(settings);
 
-    // Calculate the page
     final page = await Future.microtask(() {
       return ColumnTextLayout.layoutText(
         text: '',
-        availableWidth: _cachedAvailableWidth!,
-        availableHeight: _cachedAvailableHeight!,
-        textStyle: _cachedTextStyle!,
+        availableWidth: viewportWidth,
+        availableHeight: viewportHeight,
+        textStyle: style,
         numberOfColumns: settings.numberOfColumns,
         columnGap: settings.columnGap,
-        horizontalPadding: 0,
-        verticalPadding: 0,
-        maxPages: 1, // Only calculate one page
+        horizontalPadding: _horizontalPadding,
+        verticalPadding: _verticalPadding,
+        maxPages: 1,
         startWordIndex: startWordIndex,
-        preProcessedWords: _words,
-        textScaler: TextScaler.noScaling, // Scaling is baked into fontSize
+        preProcessedRichWords: _richWords,
+        respectFormatting: settings.respectFormatting,
+        textScaler: TextScaler.noScaling,
       );
     });
 
     if (page.isNotEmpty) {
-      // Cache the page (keep cache size reasonable)
       _pageCache[startWordIndex] = page.first;
 
-      // Limit cache size to prevent memory issues (keep last 10 pages)
-      if (_pageCache.length > 10) {
+      if (_pageCache.length > 12) {
         final keysToRemove = _pageCache.keys.toList()..sort();
         final currentIndex = keysToRemove.indexOf(startWordIndex);
 
-        // Remove pages far from current position
         for (var i = 0; i < keysToRemove.length; i++) {
-          if ((i < currentIndex - 5) || (i > currentIndex + 5)) {
+          if ((i < currentIndex - 6) || (i > currentIndex + 6)) {
             _pageCache.remove(keysToRemove[i]);
           }
         }
@@ -190,7 +230,6 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
       return page.first;
     }
 
-    // Fallback: return empty page
     return ColumnPage(
       startWordIndex: startWordIndex,
       endWordIndex: startWordIndex,
@@ -198,29 +237,21 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
     );
   }
 
-  /// Find the start of the previous page by working backward
   Future<int> _findPreviousPageStart(int currentPageStart) async {
-    // We need to find the word index that, when laid out as a page,
-    // ends exactly at currentPageStart (or as close as possible)
-
     if (currentPageStart <= 0) {
       return 0;
     }
 
-    // Binary search to find the page that ends closest to currentPageStart
     int searchStart = 0;
     int searchEnd = currentPageStart - 1;
     int bestCandidate = 0;
-    int bestEndDifference = currentPageStart; // How far off from target
+    int bestEndDifference = currentPageStart;
 
-    // Start with a guess based on current page size
     final currentPage = _currentPage;
     if (currentPage != null && currentPage.wordCount > 0) {
-      searchStart = (currentPageStart - currentPage.wordCount * 1.5)
-          .round()
-          .clamp(0, searchEnd);
+      searchStart = (currentPageStart - currentPage.wordCount * 1.6).round().clamp(0, searchEnd);
     } else {
-      searchStart = (currentPageStart - 200).clamp(0, searchEnd);
+      searchStart = (currentPageStart - 250).clamp(0, searchEnd);
     }
 
     while (searchStart <= searchEnd) {
@@ -229,80 +260,41 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
 
       final endDifference = (testPage.endWordIndex - currentPageStart).abs();
 
-      // Track the best candidate (closest to ending at currentPageStart)
       if (endDifference < bestEndDifference) {
         bestCandidate = testPage.startWordIndex;
         bestEndDifference = endDifference;
       }
 
-      // If this page ends exactly at currentPageStart, we found it!
       if (testPage.endWordIndex == currentPageStart) {
         return testPage.startWordIndex;
       } else if (testPage.endWordIndex < currentPageStart) {
-        // Page ends before target, search later (higher word indices)
         searchStart = mid + 1;
       } else {
-        // Page ends after target, search earlier (lower word indices)
         searchEnd = mid - 1;
       }
     }
 
-    // If we didn't find exact match, use the best candidate
-    if (bestEndDifference <= 50) {
+    if (bestEndDifference <= 60) {
       return bestCandidate;
     }
 
     return 0;
   }
 
-  /// Recalculate current page when settings change
   Future<void> _relayoutPage() async {
-    if (_currentPage == null) return;
-
-    // Clear the cache since layout parameters have changed
-    _pageCache.clear();
-
-    // Clear cached layout parameters to force recalculation
-    _cachedTextStyle = null;
-
-    // Get current position before recalculating
-    final currentPosition = _currentPage!.startWordIndex;
-
-    // Recalculate with new settings
-    final settings = context.read<SettingsProvider>().settings;
-
-    // Update cached text style
-    _cachedTextStyle = TextStyle(
-      fontSize: settings.traditionalFontSize,
-      color: settings.textColor,
-      fontFamily: settings.fontFamily,
-      height: settings.lineHeight,
-    );
-
-    // Recalculate current page
-    final newPage = await _calculatePage(currentPosition);
-
-    if (!mounted) return;
-
-    setState(() {
-      _currentPage = newPage;
-    });
+    if (_cachedViewportWidth == null || _cachedViewportHeight == null) return;
+    await _layoutForViewport(_cachedViewportWidth!, _cachedViewportHeight!);
   }
 
   void _saveProgress() {
     if (_currentPage == null) return;
-
     final wordPosition = _currentPage!.startWordIndex;
-
-    // Use stored provider reference instead of context.read
     _libraryProvider?.updateProgress(widget.book.id, position: wordPosition);
   }
 
   Future<void> _nextPage() async {
-    if (_currentPage == null || _currentPage!.endWordIndex >= _words.length)
-      return;
+    if (_currentPage == null || _currentPage!.endWordIndex >= _words.length) return;
 
-    // Calculate next page starting from where current page ends
     final nextPage = await _calculatePage(_currentPage!.endWordIndex);
 
     if (!mounted) return;
@@ -317,10 +309,7 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
   Future<void> _previousPage() async {
     if (_currentPage == null || _currentPage!.startWordIndex <= 0) return;
 
-    // Find where the previous page starts
-    final previousPageStart = await _findPreviousPageStart(
-      _currentPage!.startWordIndex,
-    );
+    final previousPageStart = await _findPreviousPageStart(_currentPage!.startWordIndex);
     final previousPage = await _calculatePage(previousPageStart);
 
     if (!mounted) return;
@@ -334,7 +323,6 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
 
   double _getProgress() {
     if (_currentPage == null || _words.isEmpty) return 0.0;
-
     return _currentPage!.startWordIndex / _words.length;
   }
 
@@ -348,13 +336,35 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsProvider>().settings;
+    final settingsProvider = context.watch<SettingsProvider>();
+    final settings = settingsProvider.settings;
 
     return Scaffold(
       backgroundColor: settings.backgroundColor,
       appBar: AppBar(
         title: Text(widget.book.title),
         actions: [
+          if (_chapterWordPositions.isNotEmpty)
+            TextButton.icon(
+              icon: const Icon(Icons.format_list_bulleted, size: 18),
+              label: Text('Ch ${_getCurrentChapter()}/${_chapterWordPositions.length}'),
+              onPressed: _showChaptersDialog,
+            ),
+          IconButton(
+            icon: Icon(settings.respectFormatting ? Icons.format_align_left : Icons.notes),
+            tooltip: settings.respectFormatting
+                ? 'Original Carriage Returns & Heading Sizes (Tap for Dense Reflow)'
+                : 'Dense Continuous Reflow (Tap for Original Carriage Returns & Headings)',
+            onPressed: () {
+              settingsProvider.updateRespectFormatting(!settings.respectFormatting);
+              _relayoutPage();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.speed),
+            tooltip: 'Switch to Speed Reader (Same Position)',
+            onPressed: _switchToSpeedReader,
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: _showSettingsDialog,
@@ -363,42 +373,39 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
       ),
       body: Column(
         children: [
-          // Progress bar
           LinearProgressIndicator(value: _getProgress(), minHeight: 4),
-
-          // Page content with LayoutBuilder to detect size changes
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                // Check if dimensions have changed significantly (more than 10px)
-                final needsRelayout =
-                    _cachedAvailableWidth == null ||
-                    _cachedAvailableHeight == null ||
-                    (constraints.maxWidth - (_cachedAvailableWidth! + 64))
-                            .abs() >
-                        10 ||
-                    (constraints.maxHeight - (_cachedAvailableHeight! + 64))
-                            .abs() >
-                        10;
+                final maxW = constraints.maxWidth;
+                final maxH = constraints.maxHeight;
+                final needsRelayout = _cachedViewportWidth == null ||
+                    _cachedViewportHeight == null ||
+                    (maxW - _cachedViewportWidth!).abs() >= 1.0 ||
+                    (maxH - _cachedViewportHeight!).abs() >= 1.0;
 
                 if (needsRelayout && !_isLoading && _words.isNotEmpty) {
-                  // Schedule relayout after this frame
+                  _cachedViewportWidth = maxW;
+                  _cachedViewportHeight = maxH;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) _layoutCurrentPage();
+                    if (mounted) {
+                      _layoutForViewport(maxW, maxH);
+                    }
                   });
                 }
 
                 return GestureDetector(
-                  key: _contentKey,
+                  behavior: HitTestBehavior.opaque,
                   onTapUp: (details) {
-                    final width = MediaQuery.of(context).size.width;
-                    if (details.localPosition.dx > width * 0.6) {
+                    if (details.localPosition.dx > maxW * 0.6) {
                       _nextPage();
-                    } else if (details.localPosition.dx < width * 0.4) {
+                    } else if (details.localPosition.dx < maxW * 0.4) {
                       _previousPage();
                     }
                   },
                   child: Container(
+                    width: maxW,
+                    height: maxH,
                     color: settings.backgroundColor,
                     child: _isLoading
                         ? Center(
@@ -415,22 +422,20 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                             ),
                           )
                         : _currentPage == null
-                        ? const Center(child: Text('No content available'))
-                        : _buildPageContent(settings),
+                            ? const Center(child: Text('No content available'))
+                            : _buildPageContent(settings),
                   ),
                 );
               },
             ),
           ),
-
-          // Page indicator and controls
           Container(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
             decoration: BoxDecoration(
               color: settings.backgroundColor,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
+                  color: Colors.black.withValues(alpha: 0.1),
                   blurRadius: 4,
                   offset: const Offset(0, -2),
                 ),
@@ -440,18 +445,18 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back),
+                  icon: Icon(Icons.arrow_back, color: settings.textColor),
                   onPressed: _canGoPrevious() ? _previousPage : null,
                 ),
                 Text(
-                  'Position: ${_currentWordPosition + 1}  •  ${(_getProgress() * 100).toStringAsFixed(1)}%',
+                  'Position: ${_currentWordPosition + 1} / ${_words.length}  •  ${(_getProgress() * 100).toStringAsFixed(1)}%',
                   style: TextStyle(
-                    color: settings.textColor.withOpacity(0.7),
+                    color: settings.textColor.withValues(alpha: 0.7),
                     fontSize: 14,
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.arrow_forward),
+                  icon: Icon(Icons.arrow_forward, color: settings.textColor),
                   onPressed: _canGoNext() ? _nextPage : null,
                 ),
               ],
@@ -462,55 +467,50 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
     );
   }
 
-  Widget _buildPageContent(settings) {
-    if (_currentPage == null) {
+  Widget _buildPageContent(ReadingSettings settings) {
+    final page = _currentPage;
+    if (page == null) {
       return const Center(child: Text('No content'));
     }
 
-    final page = _currentPage!;
-    // Use the cached text style that was used to Calculate this page.
-    // This prevents "Old Content + New Style = Overflow" glitches while re-layout is in progress.
-    final textStyle =
-        _cachedTextStyle ??
-        TextStyle(
-          fontSize: settings.traditionalFontSize,
-          color: settings.textColor,
-          fontFamily: settings.fontFamily,
-          height: settings.lineHeight,
-        );
+    final textStyle = _cachedTextStyle ?? _buildEffectiveTextStyle(settings);
 
-    // Build columns with proper spacing
     final List<Widget> columnWidgets = [];
     for (int i = 0; i < page.columns.length; i++) {
+      final hasRichSpan = i < page.columnSpans.length;
       final columnLines = page.columns[i];
+      final span = hasRichSpan
+          ? page.columnSpans[i]
+          : TextSpan(text: columnLines.join('\n'), style: textStyle);
 
-      // Add the column content
       columnWidgets.add(
-        Expanded(
-          child: ClipRect(
-            child: Text(
-              columnLines.join('\n'),
-              style: textStyle,
-              textAlign: TextAlign.left,
-              overflow: TextOverflow.clip,
-              textScaler:
-                  TextScaler.noScaling, // Critical: prevents double-scaling
+        SizedBox(
+          width: page.columnWidth > 0 ? page.columnWidth : null,
+          height: page.columnHeight > 0 ? page.columnHeight : null,
+          child: Semantics(
+            label: columnLines.join('\n'),
+            child: CustomPaint(
+              painter: _ColumnSpanPainter(
+                span: span,
+                columnWidth: page.columnWidth,
+              ),
             ),
           ),
         ),
       );
 
-      // Add gap between columns (but not after the last column)
       if (i < page.columns.length - 1) {
         columnWidgets.add(SizedBox(width: settings.columnGap));
       }
     }
 
     return Padding(
-      padding: const EdgeInsets.all(32.0),
+      padding: EdgeInsets.symmetric(
+        horizontal: _horizontalPadding,
+        vertical: _verticalPadding,
+      ),
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.stretch, // Changed from start to stretch
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: columnWidgets,
       ),
     );
@@ -522,31 +522,37 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Reading Settings'),
         content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Font Size'),
-              Consumer<SettingsProvider>(
-                builder: (context, provider, child) => Slider(
+          child: Consumer<SettingsProvider>(
+            builder: (context, provider, child) => Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Original Line Breaks & Headings'),
+                  subtitle: const Text('Preserve carriage returns and heading sizes'),
+                  value: provider.settings.respectFormatting,
+                  onChanged: (val) {
+                    provider.updateRespectFormatting(val);
+                    _relayoutPage();
+                  },
+                ),
+                const Divider(),
+                const Text('Font Size'),
+                Slider(
                   value: provider.settings.traditionalFontSize,
                   min: 12,
                   max: 72,
                   divisions: 60,
-                  label: provider.settings.traditionalFontSize.toStringAsFixed(
-                    0,
-                  ),
+                  label: provider.settings.traditionalFontSize.toStringAsFixed(0),
                   onChanged: (value) {
                     provider.updateTraditionalFontSize(value);
-                    // Re-layout current page with new settings
                     _relayoutPage();
                   },
                 ),
-              ),
-              const SizedBox(height: 16),
-              const Text('Number of Columns'),
-              Consumer<SettingsProvider>(
-                builder: (context, provider, child) => Slider(
+                const SizedBox(height: 16),
+                const Text('Number of Columns'),
+                Slider(
                   value: provider.settings.numberOfColumns.toDouble(),
                   min: 1,
                   max: 3,
@@ -554,19 +560,14 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                   label: provider.settings.numberOfColumns.toString(),
                   onChanged: (value) {
                     provider.updateSettings(
-                      provider.settings.copyWith(
-                        numberOfColumns: value.toInt(),
-                      ),
+                      provider.settings.copyWith(numberOfColumns: value.toInt()),
                     );
-                    // Re-layout current page with new settings
                     _relayoutPage();
                   },
                 ),
-              ),
-              const SizedBox(height: 16),
-              const Text('Column Gap'),
-              Consumer<SettingsProvider>(
-                builder: (context, provider, child) => Slider(
+                const SizedBox(height: 16),
+                const Text('Column Gap'),
+                Slider(
                   value: provider.settings.columnGap,
                   min: 16,
                   max: 64,
@@ -576,15 +577,12 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                     provider.updateSettings(
                       provider.settings.copyWith(columnGap: value),
                     );
-                    // Re-layout current page with new settings
                     _relayoutPage();
                   },
                 ),
-              ),
-              const SizedBox(height: 16),
-              const Text('Line Height'),
-              Consumer<SettingsProvider>(
-                builder: (context, provider, child) => Slider(
+                const SizedBox(height: 16),
+                const Text('Line Height'),
+                Slider(
                   value: provider.settings.lineHeight,
                   min: 1.0,
                   max: 2.5,
@@ -594,61 +592,15 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
                     provider.updateSettings(
                       provider.settings.copyWith(lineHeight: value),
                     );
-                    // Re-layout current page with new settings
                     _relayoutPage();
                   },
                 ),
-              ),
-              const SizedBox(height: 16),
-              const Text('Theme'),
-              Consumer<SettingsProvider>(
-                builder: (context, provider, child) => Wrap(
-                  spacing: 8,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('Light'),
-                      selected:
-                          provider.settings.backgroundColor == Colors.white,
-                      onSelected: (selected) {
-                        if (selected) {
-                          provider.updateColors(
-                            backgroundColor: Colors.white,
-                            textColor: Colors.black,
-                          );
-                        }
-                      },
-                    ),
-                    ChoiceChip(
-                      label: const Text('Dark'),
-                      selected:
-                          provider.settings.backgroundColor == Colors.black,
-                      onSelected: (selected) {
-                        if (selected) {
-                          provider.updateColors(
-                            backgroundColor: Colors.black,
-                            textColor: Colors.white,
-                          );
-                        }
-                      },
-                    ),
-                    ChoiceChip(
-                      label: const Text('Sepia'),
-                      selected:
-                          provider.settings.backgroundColor ==
-                          const Color(0xFFF4ECD8),
-                      onSelected: (selected) {
-                        if (selected) {
-                          provider.updateColors(
-                            backgroundColor: const Color(0xFFF4ECD8),
-                            textColor: const Color(0xFF5B4636),
-                          );
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                const Text('Theme'),
+                const SizedBox(height: 8),
+                ReadingThemeChips(provider: provider),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -659,5 +611,39 @@ class _TraditionalReaderScreenState extends State<TraditionalReaderScreen> {
         ],
       ),
     );
+  }
+}
+
+/// Renders a column's TextSpan using the exact same TextPainter configuration
+/// used during ColumnTextLayout measurement, guaranteeing 0.0px divergence.
+class _ColumnSpanPainter extends CustomPainter {
+  final TextSpan span;
+  final double columnWidth;
+
+  _ColumnSpanPainter({
+    required this.span,
+    required this.columnWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final maxWidth = columnWidth > 0 ? columnWidth : size.width;
+    if (maxWidth <= 0) return;
+
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    final textPainter = TextPainter(
+      text: span,
+      textDirection: TextDirection.ltr,
+      textScaler: TextScaler.noScaling,
+      textHeightBehavior: ColumnTextLayout.kTextHeightBehavior,
+    )..layout(maxWidth: maxWidth);
+    textPainter.paint(canvas, Offset.zero);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ColumnSpanPainter oldDelegate) {
+    return oldDelegate.span != span || oldDelegate.columnWidth != columnWidth;
   }
 }

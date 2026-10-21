@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -87,7 +87,7 @@ class LibraryService {
         return jsonList.map((json) => Book.fromJson(json)).toList();
       }
     } catch (e) {
-      print('Error loading library: $e');
+      debugPrint('Error loading library: $e');
       return [];
     }
   }
@@ -109,7 +109,7 @@ class LibraryService {
         await libraryFile.writeAsString(jsonString);
       }
     } catch (e) {
-      print('Error saving library: $e');
+      debugPrint('Error saving library: $e');
       throw Exception('Failed to save library');
     }
   }
@@ -143,24 +143,28 @@ class LibraryService {
       final pageCount = (wordCount / 300).ceil(); // Assuming ~300 words per page
       
       // Create Book object
+      final chapterPositions = List<int>.from(bookData['chapterPositions']);
       final book = Book(
         id: bookId,
         title: bookData['title'],
         author: bookData['author'],
         wordCount: wordCount,
         pageCount: pageCount,
-        chapterPositions: List<int>.from(bookData['chapterPositions']),
+        chapterPositions: chapterPositions,
         coverImagePath: coverPath,
         textFilePath: textFile.path,
         originalFilePath: filePath,
         fileFormat: bookData['format'],
         dateAdded: DateTime.now(),
-        currentPosition: TextProcessor.findStartPosition(text),
+        currentPosition: TextProcessor.findStartPosition(
+          text,
+          chapterPositions: chapterPositions,
+        ),
       );
       
       return book;
     } catch (e) {
-      print('Error importing book: $e');
+      debugPrint('Error importing book: $e');
       throw Exception('Failed to import book: $e');
     }
   }
@@ -234,19 +238,23 @@ class LibraryService {
       final pageCount = (wordCount / 300).ceil(); // Assuming ~300 words per page
       
       // Create Book object
+      final chapterPositions = List<int>.from(bookData['chapterPositions']);
       final book = Book(
         id: bookId,
         title: bookData['title'],
         author: bookData['author'],
         wordCount: wordCount,
         pageCount: pageCount,
-        chapterPositions: List<int>.from(bookData['chapterPositions']),
+        chapterPositions: chapterPositions,
         coverImagePath: coverPath,
         textFilePath: textFilePath,
         originalFilePath: fileName, // Store the filename instead of path on web
         fileFormat: bookData['format'],
         dateAdded: DateTime.now(),
-        currentPosition: TextProcessor.findStartPosition(text),
+        currentPosition: TextProcessor.findStartPosition(
+          text,
+          chapterPositions: chapterPositions,
+        ),
       );
       
       return {
@@ -254,7 +262,7 @@ class LibraryService {
         if (warning != null) 'warning': warning,
       };
     } catch (e) {
-      print('Error importing book from bytes: $e');
+      debugPrint('Error importing book from bytes: $e');
       throw Exception('Failed to import book: $e');
     }
   }
@@ -286,7 +294,7 @@ class LibraryService {
         }
       }
     } catch (e) {
-      print('Error deleting book files: $e');
+      debugPrint('Error deleting book files: $e');
     }
   }
 
@@ -307,7 +315,7 @@ class LibraryService {
         return await textFile.readAsString();
       }
     } catch (e) {
-      print('Error reading book text: $e');
+      debugPrint('Error reading book text: $e');
       throw Exception('Failed to read book text');
     }
   }
@@ -316,10 +324,7 @@ class LibraryService {
   Future<String?> updateCoverImage(Book book, String imagePath) async {
     try {
       if (kIsWeb) {
-        // On web, imagePath is actually the key in SharedPreferences or base64 data
-        // For now, web cover update is not supported via file picker
-        // This would need to be handled differently with bytes
-        print('Cover image update not yet supported on web');
+        debugPrint('Cover image update not yet supported on web');
         return null;
       } else {
         // On desktop/mobile, use file system
@@ -341,7 +346,7 @@ class LibraryService {
         return newCoverPath;
       }
     } catch (e) {
-      print('Error updating cover image: $e');
+      debugPrint('Error updating cover image: $e');
       return null;
     }
   }

@@ -1,40 +1,46 @@
 import 'package:flutter/foundation.dart';
 import '../models/book.dart';
+import '../services/catalogue_service.dart';
 import '../services/library_service.dart';
 
 class LibraryProvider extends ChangeNotifier {
   final LibraryService _libraryService = LibraryService();
+  final CatalogueService _catalogueService = CatalogueService();
   List<Book> _books = [];
   bool _isLoading = false;
+  bool _isCatalogueAvailable = false;
+  String _catalogueServerUrl = CatalogueService.defaultHostUrl;
   String _searchQuery = '';
   List<String> _selectedCategories = [];
 
   List<Book> get books {
     var filtered = _books;
-    
+
     // Apply search filter
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((book) {
         final query = _searchQuery.toLowerCase();
         return book.title.toLowerCase().contains(query) ||
-               book.author.toLowerCase().contains(query);
+            book.author.toLowerCase().contains(query);
       }).toList();
     }
-    
+
     // Apply category filter
     if (_selectedCategories.isNotEmpty) {
       filtered = filtered.where((book) {
         return book.categories.any((cat) => _selectedCategories.contains(cat));
       }).toList();
     }
-    
+
     return filtered;
   }
 
   bool get isLoading => _isLoading;
+  bool get isCatalogueAvailable => _isCatalogueAvailable;
+  String get catalogueServerUrl => _catalogueServerUrl;
   String get searchQuery => _searchQuery;
 
-  /// Load library from disk
+  /// Load library from disk and probe optional Catalogue Server availability in the background
   Future<void> loadLibrary() async {
     _isLoading = true;
     notifyListeners();
@@ -42,11 +48,32 @@ class LibraryProvider extends ChangeNotifier {
     try {
       _books = await _libraryService.loadLibrary();
     } catch (e) {
-      print('Error loading library: $e');
+      debugPrint('Error loading library: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+
+    // Non-blocking check for optional Catalogue Server
+    refreshCatalogueStatus();
+  }
+
+  /// Probe whether a Catalogue Server is reachable and update status
+  Future<bool> refreshCatalogueStatus() async {
+    try {
+      _catalogueServerUrl = await _catalogueService.getServerUrl();
+      _isCatalogueAvailable = await _catalogueService.checkAvailability();
+    } catch (_) {
+      _isCatalogueAvailable = false;
+    }
+    notifyListeners();
+    return _isCatalogueAvailable;
+  }
+
+  /// Update the Catalogue Server URL and re-probe availability
+  Future<bool> updateCatalogueServerUrl(String url) async {
+    await _catalogueService.setServerUrl(url);
+    return refreshCatalogueStatus();
   }
 
   /// Import a new book
@@ -57,7 +84,7 @@ class LibraryProvider extends ChangeNotifier {
       await _saveLibrary();
       notifyListeners();
     } catch (e) {
-      print('Error importing book: $e');
+      debugPrint('Error importing book: $e');
       rethrow;
     }
   }
@@ -78,7 +105,7 @@ class LibraryProvider extends ChangeNotifier {
         failedCount++;
         final fileName = filePath.split('/').last;
         errors.add('$fileName: ${e.toString()}');
-        print('Error importing book $filePath: $e');
+        debugPrint('Error importing book $filePath: $e');
       }
     }
 
@@ -107,12 +134,12 @@ class LibraryProvider extends ChangeNotifier {
       try {
         final bytes = fileData['bytes'] as List<int>;
         final fileName = fileData['name'] as String;
-        
+
         final result = await _libraryService.importBookFromBytes(bytes, fileName);
         final book = result['book'] as Book;
         _books.add(book);
         successCount++;
-        
+
         // Collect any warnings (e.g., cover images skipped)
         if (result.containsKey('warning')) {
           warnings.add('$fileName: ${result['warning']}');
@@ -121,7 +148,7 @@ class LibraryProvider extends ChangeNotifier {
         failedCount++;
         final fileName = fileData['name'] as String;
         errors.add('$fileName: ${e.toString()}');
-        print('Error importing book $fileName: $e');
+        debugPrint('Error importing book $fileName: $e');
       }
     }
 
@@ -136,6 +163,33 @@ class LibraryProvider extends ChangeNotifier {
       'errors': errors,
       'warnings': warnings,
     };
+  }
+
+  /// Import a single book from the Catalogue Server and enrich it with Catalogue metadata
+  Future<Book> importBookFromCatalogue(CatalogueItem item, Uint8List bytes) async {
+    final existingIdx = _books.indexWhere(
+      (b) => b.originalFilePath == 'catalogue:${item.id}' || b.title == item.title,
+    );
+    if (existingIdx != -1) {
+      return _books[existingIdx];
+    }
+
+    final result = await _libraryService.importBookFromBytes(bytes, item.fileName);
+    final parsedBook = result['book'] as Book;
+    final enriched = parsedBook.copyWith(
+      title: item.title.isNotEmpty ? item.title : parsedBook.title,
+      author: item.displayAuthor != 'Unknown Author' ? item.displayAuthor : parsedBook.author,
+      isbn: item.isbn.isNotEmpty ? item.isbn : parsedBook.isbn,
+      publicationDate: item.datecreated.isNotEmpty ? item.datecreated : parsedBook.publicationDate,
+      genre: item.collectionName != 'Unknown' ? item.collectionName : parsedBook.genre,
+      categories: item.topics.isNotEmpty ? item.topics : parsedBook.categories,
+      originalFilePath: 'catalogue:${item.id}',
+      currentPosition: item.readingProgress > 0 ? item.readingProgress : parsedBook.currentPosition,
+    );
+    _books.add(enriched);
+    await _saveLibrary();
+    notifyListeners();
+    return enriched;
   }
 
   /// Delete books
@@ -162,12 +216,23 @@ class LibraryProvider extends ChangeNotifier {
   Future<void> updateProgress(String bookId, {int? position, int? page}) async {
     final index = _books.indexWhere((b) => b.id == bookId);
     if (index != -1) {
+      final newPos = position ?? _books[index].currentPosition;
       _books[index] = _books[index].copyWith(
-        currentPosition: position ?? _books[index].currentPosition,
+        currentPosition: newPos,
         currentPage: page ?? _books[index].currentPage,
       );
       await _saveLibrary();
       notifyListeners();
+
+      if (_isCatalogueAvailable) {
+        final orig = _books[index].originalFilePath;
+        if (orig.startsWith('catalogue:')) {
+          final catId = int.tryParse(orig.substring('catalogue:'.length));
+          if (catId != null) {
+            await _catalogueService.syncReadingProgress(catId, newPos);
+          }
+        }
+      }
     }
   }
 

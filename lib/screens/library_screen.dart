@@ -9,6 +9,7 @@ import '../providers/library_provider.dart';
 import '../models/book.dart';
 import 'speed_reader_screen.dart';
 import 'traditional_reader_screen.dart';
+import 'catalogue_browser_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -51,7 +52,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           if (!_isSelectionMode)
             IconButton(
+              icon: const Icon(Icons.library_books),
+              tooltip: 'Browse Server Catalogue',
+              onPressed: _openCatalogueBrowser,
+            ),
+          if (!_isSelectionMode)
+            IconButton(
               icon: const Icon(Icons.add),
+              tooltip: 'Import Local File',
               onPressed: _importBook,
             ),
         ],
@@ -81,6 +89,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 final books = provider.books;
 
                 if (books.isEmpty) {
+                  final hasCatalogue = provider.isCatalogueAvailable;
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -92,11 +101,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           style: TextStyle(fontSize: 18, color: Colors.grey),
                         ),
                         const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.add),
-                          label: const Text('Import Books'),
-                          onPressed: _importBook,
-                        ),
+                        if (hasCatalogue) ...[
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.library_books),
+                            label: const Text('Browse Server Catalogue'),
+                            onPressed: _openCatalogueBrowser,
+                          ),
+                          const SizedBox(height: 10),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.add),
+                            label: const Text('Import Local Books'),
+                            onPressed: _importBook,
+                          ),
+                        ] else ...[
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.add),
+                            label: const Text('Import Local Books'),
+                            onPressed: _importBook,
+                          ),
+                          const SizedBox(height: 10),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.dns),
+                            label: const Text('Connect to Catalogue Server'),
+                            onPressed: _openCatalogueBrowser,
+                          ),
+                        ],
                       ],
                     ),
                   );
@@ -160,7 +189,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                           vertical: 4,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Colors.black.withOpacity(0.7),
+                                          color: Colors.black.withValues(alpha: 0.7),
                                           borderRadius: BorderRadius.circular(12),
                                         ),
                                         child: Text(
@@ -551,6 +580,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     if (confirmed == true && mounted && _libraryProvider != null) {
       await _libraryProvider!.deleteBooks([book]);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Book deleted')),
       );
@@ -567,7 +597,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (!mounted || _libraryProvider == null) return;
         await _libraryProvider!
             .updateCoverImage(book, result.files.single.path!);
-
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Cover updated')),
         );
@@ -595,5 +625,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     // Return the higher of the two progress values
     return speedProgress > pageProgress ? speedProgress : pageProgress;
+  }
+
+  void _openCatalogueBrowser() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const CatalogueBrowserScreen(),
+      ),
+    );
   }
 }

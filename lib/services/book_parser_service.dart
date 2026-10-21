@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:epubx/epubx.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:image/image.dart' as img;
@@ -24,7 +25,7 @@ class BookParserService {
     }
   }
 
-  /// Parse a book from bytes (for web platform)
+  /// Parse a book from bytes (for web platform and Catalogue imports)
   Future<Map<String, dynamic>> parseBookFromBytes(Uint8List bytes, String fileName) async {
     final extension = fileName.split('.').last.toLowerCase();
 
@@ -40,76 +41,109 @@ class BookParserService {
     }
   }
 
-  Future<Map<String, dynamic>> _parseEpub(File file) async {
-    final bytes = await file.readAsBytes();
-    final book = await EpubReader.readBook(bytes);
+  List<EpubChapter> _flattenChapters(List<EpubChapter>? chapters) {
+    final result = <EpubChapter>[];
+    final seenFiles = <String>{};
 
-    String fullText = '';
-    final List<String> chapters = [];
-
-    // Extract text from all chapters
-    for (var chapter in book.Chapters ?? []) {
-      String chapterText = _extractTextFromHtml(chapter.HtmlContent ?? '');
-      if (chapterText.isNotEmpty) {
-        chapters.add(chapterText);
-        fullText += '$chapterText\n\n';
+    void visit(List<EpubChapter>? list) {
+      if (list == null) return;
+      for (final ch in list) {
+        final htmlContent = (ch.HtmlContent ?? '').trim();
+        final fileKey = (ch.ContentFileName ?? '').split('#').first.toLowerCase();
+        if (htmlContent.isNotEmpty && (fileKey.isEmpty || !seenFiles.contains(fileKey))) {
+          if (fileKey.isNotEmpty) {
+            seenFiles.add(fileKey);
+          }
+          result.add(ch);
+        }
+        if (ch.SubChapters != null && ch.SubChapters!.isNotEmpty) {
+          visit(ch.SubChapters);
+        }
       }
     }
 
-    // Extract metadata
-    String title = book.Title ?? 'Unknown';
-    String author = book.Author ?? 'Unknown';
-    
-    // Try to find cover image
-    String? coverImageData;
+    visit(chapters);
+    return result;
+  }
+
+  Map<String, dynamic> _extractEpubBodyAndChapters(EpubBook book) {
+    final flatChapters = _flattenChapters(book.Chapters);
+    final bodyChapters = <String>[];
+    final allChaptersFallback = <String>[];
+
+    for (final chapter in flatChapters) {
+      String chapterText = _extractTextFromHtml(chapter.HtmlContent ?? '');
+      chapterText = TextProcessor.cleanText(chapterText);
+      if (chapterText.isEmpty) continue;
+
+      final chTitle = (chapter.Title ?? '').trim();
+      if (chTitle.isNotEmpty) {
+        final firstLine = chapterText.split('\n').first.replaceAll(RegExp(r'^#+\s*'), '').trim();
+        if (firstLine.toLowerCase() != chTitle.toLowerCase()) {
+          chapterText = '# $chTitle\n\n$chapterText';
+        }
+      }
+
+      allChaptersFallback.add(chapterText);
+
+      // Filter out non-book front-matter and back-matter (Copyright, Title Page, TOC, Credits, etc.)
+      final isBoilerplate = TextProcessor.isFrontOrBackMatterSection(
+        title: chapter.Title,
+        fileName: chapter.ContentFileName,
+        text: chapterText,
+      );
+      if (!isBoilerplate) {
+        bodyChapters.add(chapterText);
+      }
+    }
+
+    final chosenChapters = bodyChapters.isNotEmpty ? bodyChapters : allChaptersFallback;
+    final fullText = TextProcessor.cleanText(chosenChapters.join('\n\n'));
+    final chapterPositions = TextProcessor.calculateChapterWordPositions(chosenChapters);
+
+    return {
+      'text': fullText,
+      'chapterPositions': chapterPositions,
+    };
+  }
+
+  String? _extractEpubCoverBase64(EpubBook book) {
     try {
-      // Try multiple methods to extract cover image
       List<int>? coverBytes;
-      
-      // Method 1: Try CoverImage property (if available as bytes)
+
       if (book.CoverImage != null) {
         if (book.CoverImage is List<int>) {
           coverBytes = book.CoverImage as List<int>;
         } else if (book.CoverImage is img.Image) {
-          final pngBytes = img.encodePng(book.CoverImage as img.Image);
-          coverBytes = pngBytes;
+          coverBytes = img.encodePng(book.CoverImage as img.Image);
         }
       }
-      
-      // Method 2: Search in Content.Images for cover
+
       if (coverBytes == null && book.Content?.Images != null) {
         final images = book.Content!.Images!;
-        
-        // Look for common cover image names
-        final coverPatterns = ['cover', 'Cover', 'COVER', 'cover.jpg', 'cover.png', 
-                               'cover.jpeg', 'Cover.jpg', 'Cover.png', 'titlepage'];
-        
-        for (var pattern in coverPatterns) {
-          var coverImage = images[pattern];
+        const coverPatterns = [
+          'cover',
+          'Cover',
+          'COVER',
+          'cover.jpg',
+          'cover.png',
+          'cover.jpeg',
+          'Cover.jpg',
+          'Cover.png',
+          'titlepage',
+        ];
+
+        for (final pattern in coverPatterns) {
+          final coverImage = images[pattern];
           if (coverImage != null && coverImage.Content != null) {
             coverBytes = coverImage.Content;
             break;
           }
         }
-        
-        // If still not found, try the first image
-        if (coverBytes == null && images.isNotEmpty) {
-          final firstImage = images.values.first;
-          if (firstImage.Content != null) {
-            coverBytes = firstImage.Content;
-          }
-        }
-      }
-      
-      // Method 3: Check metadata for cover reference
-      if (coverBytes == null && book.Content?.Images != null) {
-        // Some EPUBs reference cover in metadata
-        final meta = book.Schema?.Package?.Metadata;
-        if (meta != null) {
-          // Try to find cover reference in metadata
-          final images = book.Content!.Images!;
-          for (var entry in images.entries) {
-            if (entry.key.toLowerCase().contains('cover') || 
+
+        if (coverBytes == null) {
+          for (final entry in images.entries) {
+            if (entry.key.toLowerCase().contains('cover') ||
                 entry.value.FileName?.toLowerCase().contains('cover') == true) {
               if (entry.value.Content != null) {
                 coverBytes = entry.value.Content;
@@ -118,53 +152,81 @@ class BookParserService {
             }
           }
         }
+
+        if (coverBytes == null && images.isNotEmpty) {
+          final firstImage = images.values.first;
+          if (firstImage.Content != null) {
+            coverBytes = firstImage.Content;
+          }
+        }
       }
-      
-      // Encode cover bytes if found
+
       if (coverBytes != null && coverBytes.isNotEmpty) {
-        coverImageData = base64Encode(coverBytes);
+        return base64Encode(coverBytes);
       }
     } catch (e) {
-      print('Failed to extract cover image: $e');
+      debugPrint('Failed to extract cover image: $e');
     }
+    return null;
+  }
 
-    // Calculate chapter positions
-    List<int> chapterPositions = TextProcessor.calculateChapterPositions(fullText, chapters);
+  Future<Map<String, dynamic>> _parseEpub(File file) async {
+    final bytes = await file.readAsBytes();
+    final book = await EpubReader.readBook(bytes);
+    final extracted = _extractEpubBodyAndChapters(book);
 
     return {
-      'text': TextProcessor.cleanText(fullText),
-      'title': title,
-      'author': author,
-      'coverImageData': coverImageData,
-      'chapterPositions': chapterPositions,
+      'text': extracted['text'],
+      'title': book.Title ?? 'Unknown',
+      'author': book.Author ?? 'Unknown',
+      'coverImageData': _extractEpubCoverBase64(book),
+      'chapterPositions': extracted['chapterPositions'],
+      'format': 'epub',
+    };
+  }
+
+  Future<Map<String, dynamic>> _parseEpubFromBytes(Uint8List bytes, String fileName) async {
+    final book = await EpubReader.readBook(bytes);
+    final extracted = _extractEpubBodyAndChapters(book);
+
+    return {
+      'text': extracted['text'],
+      'title': book.Title ?? fileName.replaceAll('.epub', '').replaceAll('_', ' '),
+      'author': book.Author ?? 'Unknown',
+      'coverImageData': _extractEpubCoverBase64(book),
+      'chapterPositions': extracted['chapterPositions'],
       'format': 'epub',
     };
   }
 
   Future<Map<String, dynamic>> _parsePdf(File file) async {
     final bytes = await file.readAsBytes();
+    return _parsePdfFromBytes(bytes, file.path.split('/').last);
+  }
+
+  Future<Map<String, dynamic>> _parsePdfFromBytes(Uint8List bytes, String fileName) async {
     final PdfDocument document = PdfDocument(inputBytes: bytes);
 
-    String fullText = '';
-    
-    // Extract text from all pages
+    final pagesText = <String>[];
+    final PdfTextExtractor extractor = PdfTextExtractor(document);
     for (int i = 0; i < document.pages.count; i++) {
-      final PdfTextExtractor extractor = PdfTextExtractor(document);
-      final String pageText = extractor.extractText(startPageIndex: i, endPageIndex: i);
-      fullText += '$pageText\n';
+      final String pageText = extractor.extractText(startPageIndex: i, endPageIndex: i).trim();
+      if (pageText.isEmpty) continue;
+      // Skip early copyright/colophon pages in PDFs (first 5 pages)
+      if (i < 5 && TextProcessor.isFrontOrBackMatterSection(text: pageText)) {
+        continue;
+      }
+      pagesText.add(pageText);
     }
 
     document.dispose();
 
-    // Try to extract title from filename
-    String filename = file.path.split('/').last;
-    String title = filename.replaceAll('.pdf', '').replaceAll('_', ' ');
-
-    // Calculate chapter positions (simple heuristic)
-    List<int> chapterPositions = TextProcessor.detectChapters(fullText);
+    final fullText = TextProcessor.cleanText(pagesText.join('\n\n'));
+    final title = fileName.replaceAll('.pdf', '').replaceAll('_', ' ');
+    final chapterPositions = TextProcessor.detectChapters(fullText);
 
     return {
-      'text': TextProcessor.cleanText(fullText),
+      'text': fullText,
       'title': title,
       'author': 'Unknown',
       'coverImageData': null,
@@ -174,17 +236,18 @@ class BookParserService {
   }
 
   Future<Map<String, dynamic>> _parseTxt(File file) async {
-    String fullText = await file.readAsString();
+    final bytes = await file.readAsBytes();
+    return _parseTxtFromBytes(bytes, file.path.split('/').last);
+  }
 
-    // Try to extract title from filename
-    String filename = file.path.split('/').last;
-    String title = filename.replaceAll('.txt', '').replaceAll('_', ' ');
-
-    // Calculate chapter positions
-    List<int> chapterPositions = TextProcessor.detectChapters(fullText);
+  Future<Map<String, dynamic>> _parseTxtFromBytes(Uint8List bytes, String fileName) async {
+    final rawText = utf8.decode(bytes, allowMalformed: true);
+    final cleaned = TextProcessor.cleanText(rawText);
+    final title = fileName.replaceAll('.txt', '').replaceAll('_', ' ');
+    final chapterPositions = TextProcessor.detectChapters(cleaned);
 
     return {
-      'text': TextProcessor.cleanText(fullText),
+      'text': cleaned,
       'title': title,
       'author': 'Unknown',
       'coverImageData': null,
@@ -194,43 +257,81 @@ class BookParserService {
   }
 
   String _extractTextFromHtml(String html) {
-    // Convert common HTML elements to preserve structure
     String text = html;
-    
-    // Convert block-level elements to line breaks
+
+    // Strip script, style, and head blocks completely
+    text = text.replaceAll(
+      RegExp(r'<\s*(script|style|head)[^>]*>.*?<\s*/\s*\1\s*>',
+          caseSensitive: false, dotAll: true),
+      '',
+    );
+
+    // Normalize newlines inside HTML source before converting block tags
+    text = text.replaceAll(RegExp(r'\r?\n'), ' ');
+
+    // Preserve heading levels (H1, H2, H3+) with markdown markers and paragraph breaks
+    text = text.replaceAllMapped(
+      RegExp(r'<\s*h1[^>]*>(.*?)<\s*/\s*h1\s*>', caseSensitive: false, dotAll: true),
+      (m) => '\n\n# ${_stripInlineTags(m.group(1) ?? '')}\n\n',
+    );
+    text = text.replaceAllMapped(
+      RegExp(r'<\s*h2[^>]*>(.*?)<\s*/\s*h2\s*>', caseSensitive: false, dotAll: true),
+      (m) => '\n\n## ${_stripInlineTags(m.group(1) ?? '')}\n\n',
+    );
+    text = text.replaceAllMapped(
+      RegExp(r'<\s*h[3-6][^>]*>(.*?)<\s*/\s*h[3-6]\s*>', caseSensitive: false, dotAll: true),
+      (m) => '\n\n### ${_stripInlineTags(m.group(1) ?? '')}\n\n',
+    );
+
+    // Convert line breaks and list items to single carriage returns
     text = text.replaceAll(RegExp(r'<\s*br\s*/?\s*>', caseSensitive: false), '\n');
-    text = text.replaceAll(RegExp(r'<\s*/\s*p\s*>', caseSensitive: false), '\n\n');
-    text = text.replaceAll(RegExp(r'<\s*/\s*div\s*>', caseSensitive: false), '\n\n');
-    text = text.replaceAll(RegExp(r'<\s*/\s*h[1-6]\s*>', caseSensitive: false), '\n\n');
+    text = text.replaceAll(RegExp(r'<\s*li[^>]*>', caseSensitive: false), '\n• ');
     text = text.replaceAll(RegExp(r'<\s*/\s*li\s*>', caseSensitive: false), '\n');
     text = text.replaceAll(RegExp(r'<\s*/\s*tr\s*>', caseSensitive: false), '\n');
-    text = text.replaceAll(RegExp(r'<\s*/\s*blockquote\s*>', caseSensitive: false), '\n\n');
-    
-    // Remove all other HTML tags
+
+    // Convert block-level elements to paragraph breaks (\n\n)
+    text = text.replaceAll(
+      RegExp(r'<\s*/\s*(p|div|section|article|blockquote|pre|ul|ol|table)\s*>',
+          caseSensitive: false),
+      '\n\n',
+    );
+
+    // Remove all remaining HTML tags
     text = text.replaceAll(RegExp(r'<[^>]*>'), '');
-    
-    // Decode HTML entities - do this BEFORE numeric entities to avoid double-decoding
+
+    // Decode HTML entities
     text = _decodeHtmlEntities(text);
-    
+
     return text.trim();
+  }
+
+  String _stripInlineTags(String fragment) {
+    return _decodeHtmlEntities(fragment.replaceAll(RegExp(r'<[^>]*>'), ''))
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   /// Comprehensive HTML entity decoder
   String _decodeHtmlEntities(String text) {
-    // First, decode hexadecimal HTML entities (e.g., &#x2009; &#xA0;)
     text = text.replaceAllMapped(
       RegExp(r'&#x([0-9a-fA-F]+);'),
       (match) {
         try {
           final code = int.parse(match.group(1)!, radix: 16);
-          // Convert common whitespace entities to regular spaces
-          if (code == 0x00A0 || code == 0x2009 || code == 0x200A || 
-              code == 0x2002 || code == 0x2003 || code == 0x2004 ||
-              code == 0x2005 || code == 0x2006 || code == 0x2007 ||
-              code == 0x2008 || code == 0x202F || code == 0x205F) {
-            return ' '; // Convert various space characters to regular space
+          if (code == 0x00A0 ||
+              code == 0x2009 ||
+              code == 0x200A ||
+              code == 0x2002 ||
+              code == 0x2003 ||
+              code == 0x2004 ||
+              code == 0x2005 ||
+              code == 0x2006 ||
+              code == 0x2007 ||
+              code == 0x2008 ||
+              code == 0x202F ||
+              code == 0x205F) {
+            return ' ';
           }
-          // Convert zero-width spaces and soft hyphens to empty string
           if (code == 0x200B || code == 0x200C || code == 0x200D || code == 0x00AD) {
             return '';
           }
@@ -240,21 +341,26 @@ class BookParserService {
         }
       },
     );
-    
-    // Decode decimal numeric entities (e.g., &#8201; &#160;)
+
     text = text.replaceAllMapped(
       RegExp(r'&#(\d+);'),
       (match) {
         try {
           final code = int.parse(match.group(1)!);
-          // Convert common whitespace entities to regular spaces
-          if (code == 160 || code == 8201 || code == 8202 || 
-              code == 8194 || code == 8195 || code == 8196 ||
-              code == 8197 || code == 8198 || code == 8199 ||
-              code == 8200 || code == 8239 || code == 8287) {
-            return ' '; // Convert various space characters to regular space
+          if (code == 160 ||
+              code == 8201 ||
+              code == 8202 ||
+              code == 8194 ||
+              code == 8195 ||
+              code == 8196 ||
+              code == 8197 ||
+              code == 8198 ||
+              code == 8199 ||
+              code == 8200 ||
+              code == 8239 ||
+              code == 8287) {
+            return ' ';
           }
-          // Convert zero-width spaces and soft hyphens to empty string
           if (code == 8203 || code == 8204 || code == 8205 || code == 173) {
             return '';
           }
@@ -264,8 +370,7 @@ class BookParserService {
         }
       },
     );
-    
-    // Decode named HTML entities
+
     text = text
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&ensp;', ' ')
@@ -283,10 +388,10 @@ class BookParserService {
         .replaceAll('&mdash;', '—')
         .replaceAll('&ndash;', '–')
         .replaceAll('&hellip;', '…')
-        .replaceAll('&lsquo;', ''')
-        .replaceAll('&rsquo;', ''')
-        .replaceAll('&ldquo;', '"')
-        .replaceAll('&rdquo;', '"')
+        .replaceAll('&lsquo;', '‘')
+        .replaceAll('&rsquo;', '’')
+        .replaceAll('&ldquo;', '“')
+        .replaceAll('&rdquo;', '”')
         .replaceAll('&laquo;', '«')
         .replaceAll('&raquo;', '»')
         .replaceAll('&bull;', '•')
@@ -299,125 +404,7 @@ class BookParserService {
         .replaceAll('&frac14;', '¼')
         .replaceAll('&frac12;', '½')
         .replaceAll('&frac34;', '¾');
-    
+
     return text;
-  }
-
-  // Byte-based parsing methods for web platform
-
-  Future<Map<String, dynamic>> _parseEpubFromBytes(Uint8List bytes, String fileName) async {
-    final book = await EpubReader.readBook(bytes);
-
-    String fullText = '';
-    final List<String> chapters = [];
-
-    // Extract text from all chapters
-    for (var chapter in book.Chapters ?? []) {
-      String chapterText = _extractTextFromHtml(chapter.HtmlContent ?? '');
-      if (chapterText.isNotEmpty) {
-        chapters.add(chapterText);
-        fullText += '$chapterText\n\n';
-      }
-    }
-
-    // Extract metadata
-    String title = book.Title ?? fileName.replaceAll('.epub', '').replaceAll('_', ' ');
-    String author = book.Author ?? 'Unknown';
-    
-    // Try to find cover image
-    String? coverImageData;
-    try {
-      List<int>? coverBytes;
-      
-      if (book.CoverImage != null) {
-        if (book.CoverImage is List<int>) {
-          coverBytes = book.CoverImage as List<int>;
-        } else if (book.CoverImage is img.Image) {
-          final pngBytes = img.encodePng(book.CoverImage as img.Image);
-          coverBytes = pngBytes;
-        }
-      }
-      
-      if (coverBytes == null && book.Content?.Images != null) {
-        final images = book.Content!.Images!;
-        final coverPatterns = ['cover', 'Cover', 'COVER', 'cover.jpg', 'cover.png', 
-                               'cover.jpeg', 'Cover.jpg', 'Cover.png', 'titlepage'];
-        
-        for (var pattern in coverPatterns) {
-          var coverImage = images[pattern];
-          if (coverImage != null && coverImage.Content != null) {
-            coverBytes = coverImage.Content;
-            break;
-          }
-        }
-        
-        if (coverBytes == null && images.isNotEmpty) {
-          final firstImage = images.values.first;
-          if (firstImage.Content != null) {
-            coverBytes = firstImage.Content;
-          }
-        }
-      }
-      
-      if (coverBytes != null && coverBytes.isNotEmpty) {
-        coverImageData = base64Encode(coverBytes);
-      }
-    } catch (e) {
-      print('Failed to extract cover image: $e');
-    }
-
-    List<int> chapterPositions = TextProcessor.calculateChapterPositions(fullText, chapters);
-
-    return {
-      'text': TextProcessor.cleanText(fullText),
-      'title': title,
-      'author': author,
-      'coverImageData': coverImageData,
-      'chapterPositions': chapterPositions,
-      'format': 'epub',
-    };
-  }
-
-  Future<Map<String, dynamic>> _parsePdfFromBytes(Uint8List bytes, String fileName) async {
-    final PdfDocument document = PdfDocument(inputBytes: bytes);
-
-    String fullText = '';
-    
-    // Extract text from all pages
-    for (int i = 0; i < document.pages.count; i++) {
-      final PdfTextExtractor extractor = PdfTextExtractor(document);
-      final String pageText = extractor.extractText(startPageIndex: i, endPageIndex: i);
-      fullText += '$pageText\n';
-    }
-
-    document.dispose();
-
-    String title = fileName.replaceAll('.pdf', '').replaceAll('_', ' ');
-    List<int> chapterPositions = TextProcessor.detectChapters(fullText);
-
-    return {
-      'text': TextProcessor.cleanText(fullText),
-      'title': title,
-      'author': 'Unknown',
-      'coverImageData': null,
-      'chapterPositions': chapterPositions,
-      'format': 'pdf',
-    };
-  }
-
-  Future<Map<String, dynamic>> _parseTxtFromBytes(Uint8List bytes, String fileName) async {
-    String fullText = utf8.decode(bytes);
-
-    String title = fileName.replaceAll('.txt', '').replaceAll('_', ' ');
-    List<int> chapterPositions = TextProcessor.detectChapters(fullText);
-
-    return {
-      'text': TextProcessor.cleanText(fullText),
-      'title': title,
-      'author': 'Unknown',
-      'coverImageData': null,
-      'chapterPositions': chapterPositions,
-      'format': 'txt',
-    };
   }
 }

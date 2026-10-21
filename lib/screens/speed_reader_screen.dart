@@ -6,6 +6,8 @@ import '../providers/library_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/library_service.dart';
 import '../utils/text_processor.dart';
+import '../widgets/reader_shared_widgets.dart';
+import 'traditional_reader_screen.dart';
 
 class SpeedReaderScreen extends StatefulWidget {
   final Book book;
@@ -18,15 +20,17 @@ class SpeedReaderScreen extends StatefulWidget {
 
 class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
   final LibraryService _libraryService = LibraryService();
-  
+
+  List<RichWord> _richWords = [];
   List<String> _words = [];
+  List<int> _chapterWordPositions = [];
+  List<ChapterInfo> _chapters = [];
   int _currentIndex = 0;
   bool _isPlaying = false;
   Timer? _timer;
   String _fullText = '';
-  int _currentChapter = 0;
-  
-  // Store provider reference to use in dispose
+  int _currentChapter = 1;
+
   LibraryProvider? _libraryProvider;
 
   @override
@@ -34,11 +38,10 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
     super.initState();
     _loadBook();
   }
-  
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Get and store the provider reference when dependencies are available
     _libraryProvider ??= context.read<LibraryProvider>();
   }
 
@@ -52,22 +55,26 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
   Future<void> _loadBook() async {
     try {
       _fullText = await _libraryService.readBookText(widget.book);
-      _words = TextProcessor.splitIntoWords(_fullText);
-      
-      int initialPosition = 0;
-      
-      // Prefer the word position if it exists (from speed reading)
-      if (widget.book.currentPosition > 0) {
-        initialPosition = widget.book.currentPosition;
-      } 
-      // Otherwise, if there's a traditional reading page position, sync to it
-      else if (widget.book.currentPage > 0 && widget.book.pageCount > 0) {
-        // Calculate which word position corresponds to the current page
-        final progressRatio = widget.book.currentPage / widget.book.pageCount;
-        initialPosition = (progressRatio * _words.length).floor();
+      _richWords = TextProcessor.parseRichWords(_fullText);
+      _words = _richWords.map((rw) => rw.text).toList();
+
+      if (_words.isEmpty) return;
+
+      _chapterWordPositions = TextProcessor.normalizeChapterWordPositions(
+        widget.book.chapterPositions,
+        _words.length,
+        _fullText.length,
+      );
+      _chapters = TextProcessor.buildChapterInfoList(_richWords, _chapterWordPositions);
+
+      int initialPosition = widget.book.currentPosition;
+      if (initialPosition <= 0) {
+        initialPosition = TextProcessor.findStartPosition(
+          _fullText,
+          chapterPositions: _chapterWordPositions,
+        );
       }
-      
-      // Set initial position
+
       setState(() {
         _currentIndex = initialPosition.clamp(0, _words.length - 1);
         _currentChapter = _getCurrentChapter();
@@ -78,6 +85,20 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
         SnackBar(content: Text('Error loading book: $e')),
       );
     }
+  }
+
+  void _switchToTraditionalReader() {
+    _timer?.cancel();
+    _isPlaying = false;
+    _saveProgress();
+
+    final updatedBook = widget.book.copyWith(currentPosition: _currentIndex);
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TraditionalReaderScreen(book: updatedBook),
+      ),
+    );
   }
 
   void _togglePlayPause() {
@@ -105,11 +126,14 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
         return;
       }
 
-      // Check if previous word ended with a sentence-ending punctuation
-      bool shouldPauseForSentence = false;
-      if (settings.pauseOnSentenceEnd && _currentIndex > 0) {
-        final previousWord = _words[_currentIndex];
-        shouldPauseForSentence = _endsWithSentencePunctuation(previousWord);
+      bool shouldPauseForBoundary = false;
+      if (_currentIndex >= 0 && _currentIndex < _richWords.length) {
+        final prevRich = _richWords[_currentIndex];
+        if (settings.pauseOnSentenceEnd && _endsWithSentencePunctuation(prevRich.text)) {
+          shouldPauseForBoundary = true;
+        } else if (prevRich.lineBreaksAfter >= 2 || prevRich.headingLevel > 0) {
+          shouldPauseForBoundary = true;
+        }
       }
 
       setState(() {
@@ -117,26 +141,20 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
         _currentChapter = _getCurrentChapter();
       });
 
-      // Determine if we need an extended pause
       int pauseMultiplier = 1;
-      
-      // Check for sentence end pause (takes precedence)
-      if (shouldPauseForSentence) {
+      if (shouldPauseForBoundary) {
         pauseMultiplier = 2;
-      }
-      // Otherwise check for long word pause
-      else if (settings.pauseOnLongWords) {
+      } else if (settings.pauseOnLongWords) {
         final currentWord = _words[_currentIndex];
         if (currentWord.length >= settings.longWordThreshold) {
           pauseMultiplier = settings.longWordPauseMultiplier;
         }
       }
 
-      // Apply extended pause if needed
       if (pauseMultiplier > 1) {
         _timer?.cancel();
         Future.delayed(baseDelay * pauseMultiplier, () {
-          if (_isPlaying) {
+          if (_isPlaying && mounted) {
             _startReading();
           }
         });
@@ -144,22 +162,21 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
     });
   }
 
-  /// Check if a word ends with sentence-ending punctuation
   bool _endsWithSentencePunctuation(String word) {
     if (word.isEmpty) return false;
-    final lastChar = word[word.length - 1];
+    final cleaned = word.replaceAll(RegExp(r'''["'”’)\]]+$'''), '');
+    if (cleaned.isEmpty) return false;
+    final lastChar = cleaned[cleaned.length - 1];
     return lastChar == '.' || lastChar == '!' || lastChar == '?';
   }
 
   void _saveProgress() {
-    // Calculate approximate page based on current word position
     int page = 0;
     if (_words.isNotEmpty && widget.book.pageCount > 0) {
       final progressRatio = _currentIndex / _words.length;
       page = (progressRatio * widget.book.pageCount).floor();
     }
-    
-    // Use stored provider reference instead of context.read
+
     _libraryProvider?.updateProgress(
       widget.book.id,
       position: _currentIndex,
@@ -167,11 +184,11 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
     );
   }
 
-  String _getCurrentWord() {
-    if (_words.isEmpty || _currentIndex >= _words.length) {
-      return '';
+  RichWord? _getCurrentRichWord() {
+    if (_richWords.isEmpty || _currentIndex >= _richWords.length) {
+      return null;
     }
-    return _words[_currentIndex];
+    return _richWords[_currentIndex];
   }
 
   double _getProgress() {
@@ -179,34 +196,21 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
     return _currentIndex / _words.length;
   }
 
-  /// Find the current chapter based on word position
   int _getCurrentChapter() {
-    if (widget.book.chapterPositions.isEmpty) return 0;
-    
-    // Calculate the character position in the original full text
-    // We need to find where we are in the original text, not the word array
-    // Use a simple ratio-based approach
-    if (_words.isEmpty) return 1;
-    
-    final progressRatio = _currentIndex / _words.length;
-    final approximateCharPosition = (progressRatio * _fullText.length).round();
-    
-    // Find which chapter this position falls into
-    for (int i = widget.book.chapterPositions.length - 1; i >= 0; i--) {
-      if (approximateCharPosition >= widget.book.chapterPositions[i]) {
-        return i + 1; // Chapter numbers are 1-based
+    if (_chapterWordPositions.isEmpty) return 1;
+    for (int i = _chapterWordPositions.length - 1; i >= 0; i--) {
+      if (_currentIndex >= _chapterWordPositions[i]) {
+        return i + 1;
       }
     }
-    return 1; // Default to chapter 1
+    return 1;
   }
 
-  /// Move to the next sentence
   void _nextSentence() {
     if (_currentIndex >= _words.length - 1) return;
-    
-    // Find the next sentence ending
+
     for (int i = _currentIndex + 1; i < _words.length; i++) {
-      if (_endsWithSentencePunctuation(_words[i])) {
+      if (_endsWithSentencePunctuation(_words[i]) || _richWords[i].lineBreaksAfter > 0) {
         setState(() {
           _currentIndex = (i + 1).clamp(0, _words.length - 1);
           _currentChapter = _getCurrentChapter();
@@ -214,207 +218,197 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
         return;
       }
     }
-    
-    // If no sentence ending found, go to end
+
     setState(() {
       _currentIndex = _words.length - 1;
       _currentChapter = _getCurrentChapter();
     });
   }
 
-  /// Move to the previous sentence
   void _previousSentence() {
     if (_currentIndex <= 0) return;
-    
-    // Move back to find the start of current sentence
-    int sentenceStart = _currentIndex;
-    for (int i = _currentIndex - 1; i >= 0; i--) {
-      if (_endsWithSentencePunctuation(_words[i])) {
-        sentenceStart = i + 1;
+
+    int target = 0;
+    for (int i = _currentIndex - 2; i >= 0; i--) {
+      if (_endsWithSentencePunctuation(_words[i]) || _richWords[i].lineBreaksAfter > 0) {
+        target = i + 1;
         break;
       }
-      if (i == 0) {
-        sentenceStart = 0;
-      }
     }
-    
-    // If we're already at sentence start, find previous sentence
-    if (sentenceStart == _currentIndex) {
-      for (int i = _currentIndex - 1; i >= 0; i--) {
-        if (_endsWithSentencePunctuation(_words[i])) {
-          // Found previous sentence ending, find its start
-          for (int j = i - 1; j >= 0; j--) {
-            if (_endsWithSentencePunctuation(_words[j])) {
-              setState(() {
-                _currentIndex = j + 1;
-                _currentChapter = _getCurrentChapter();
-              });
-              return;
-            }
-            if (j == 0) {
-              setState(() {
-                _currentIndex = 0;
-                _currentChapter = _getCurrentChapter();
-              });
-              return;
-            }
-          }
-        }
-      }
-    }
-    
+
     setState(() {
-      _currentIndex = sentenceStart;
+      _currentIndex = target.clamp(0, _words.length - 1);
       _currentChapter = _getCurrentChapter();
     });
   }
 
-  /// Move to the next chapter
   void _nextChapter() {
-    if (widget.book.chapterPositions.isEmpty || _currentIndex >= _words.length - 1) return;
-    
-    // Calculate current position in the full text using ratio
-    final currentProgressRatio = _currentIndex / _words.length;
-    final currentCharPosition = (currentProgressRatio * _fullText.length).round();
-    
-    // Find the next chapter position
-    for (int chapterPos in widget.book.chapterPositions) {
-      if (chapterPos > currentCharPosition) {
-        // Convert chapter character position to word index using ratio
-        final chapterProgressRatio = chapterPos / _fullText.length;
-        final targetWordIndex = (chapterProgressRatio * _words.length).round();
+    if (_chapterWordPositions.isEmpty || _currentIndex >= _words.length - 1) return;
+
+    for (final chapterWordPos in _chapterWordPositions) {
+      if (chapterWordPos > _currentIndex) {
         setState(() {
-          _currentIndex = targetWordIndex.clamp(0, _words.length - 1);
+          _currentIndex = chapterWordPos.clamp(0, _words.length - 1);
           _currentChapter = _getCurrentChapter();
         });
+        _saveProgress();
         return;
       }
     }
   }
 
-  /// Move to the previous chapter
   void _previousChapter() {
-    if (widget.book.chapterPositions.isEmpty || _currentIndex <= 0) return;
-    
-    // Calculate current position in the full text using ratio
-    final currentProgressRatio = _currentIndex / _words.length;
-    final currentCharPosition = (currentProgressRatio * _fullText.length).round();
-    
-    // Find the previous chapter position (skip current chapter start)
-    for (int i = widget.book.chapterPositions.length - 1; i >= 0; i--) {
-      int chapterPos = widget.book.chapterPositions[i];
-      // Check if this chapter is before current position
-      // Use a threshold to avoid jumping to current chapter start
-      if (chapterPos < currentCharPosition - 100) {
-        final chapterProgressRatio = chapterPos / _fullText.length;
-        final targetWordIndex = (chapterProgressRatio * _words.length).round();
+    if (_chapterWordPositions.isEmpty || _currentIndex <= 0) return;
+
+    for (int i = _chapterWordPositions.length - 1; i >= 0; i--) {
+      final chapterWordPos = _chapterWordPositions[i];
+      if (chapterWordPos < _currentIndex - 15) {
         setState(() {
-          _currentIndex = targetWordIndex.clamp(0, _words.length - 1);
+          _currentIndex = chapterWordPos.clamp(0, _words.length - 1);
           _currentChapter = _getCurrentChapter();
         });
+        _saveProgress();
         return;
       }
     }
-    
-    // If no previous chapter found, go to start
+
     setState(() {
       _currentIndex = 0;
       _currentChapter = _getCurrentChapter();
     });
   }
 
+  void _showChaptersDialog() {
+    showChaptersModalDialog(
+      context: context,
+      chapters: _chapters,
+      currentChapter: _currentChapter,
+      totalWords: _words.length,
+      onChapterSelected: (ch) {
+        setState(() {
+          _currentIndex = ch.wordIndex.clamp(0, _words.length - 1);
+          _currentChapter = _getCurrentChapter();
+        });
+        _saveProgress();
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>().settings;
+    final currentRich = _getCurrentRichWord();
+    final headingLevel = currentRich?.headingLevel ?? 0;
+    final double fontMultiplier =
+        headingLevel == 1 ? 1.35 : (headingLevel == 2 ? 1.2 : (headingLevel == 3 ? 1.1 : 1.0));
 
     return Scaffold(
       backgroundColor: settings.backgroundColor,
       appBar: AppBar(
         title: Text(widget.book.title),
         actions: [
-          // Chapter indicator
-          if (widget.book.chapterPositions.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Center(
-                child: Text(
-                  'Chapter $_currentChapter',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
+          if (_chapterWordPositions.isNotEmpty)
+            TextButton.icon(
+              icon: const Icon(Icons.format_list_bulleted, size: 18),
+              label: Text('Ch $_currentChapter/${_chapterWordPositions.length}'),
+              onPressed: _showChaptersDialog,
             ),
           IconButton(
+            icon: const Icon(Icons.chrome_reader_mode),
+            tooltip: 'Switch to Traditional Reader (Same Position)',
+            onPressed: _switchToTraditionalReader,
+          ),
+          IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () {
-              _showSettingsDialog();
-            },
+            onPressed: _showSettingsDialog,
           ),
         ],
       ),
       body: Column(
         children: [
-          // Progress bar
           LinearProgressIndicator(
             value: _getProgress(),
             minHeight: 4,
           ),
-          
-          // Word display
           Expanded(
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.all(32.0),
-                child: Text(
-                  _getCurrentWord(),
-                  style: TextStyle(
-                    fontSize: settings.speedReaderFontSize,
-                    color: settings.textColor,
-                    fontFamily: settings.fontFamily,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  textAlign: TextAlign.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (headingLevel > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12.0),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            headingLevel == 1 ? 'CHAPTER HEADING' : 'SECTION HEADING',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.1,
+                              color: settings.textColor.withValues(alpha: 0.75),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Text(
+                      currentRich?.text ?? '',
+                      style: TextStyle(
+                        fontSize: settings.speedReaderFontSize * fontMultiplier,
+                        color: settings.textColor,
+                        fontFamily: settings.fontFamily,
+                        fontWeight: headingLevel > 0 ? FontWeight.bold : FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-
-          // Progress text
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Text(
-              '${_currentIndex + 1} / ${_words.length} words  •  ${(_getProgress() * 100).toStringAsFixed(1)}%',
+              '${_words.isEmpty ? 0 : _currentIndex + 1} / ${_words.length} words  •  ${(_getProgress() * 100).toStringAsFixed(1)}%',
               style: TextStyle(
-                color: settings.textColor.withOpacity(0.7),
+                color: settings.textColor.withValues(alpha: 0.7),
                 fontSize: 14,
               ),
             ),
           ),
-
-          // Controls
           Padding(
-            padding: const EdgeInsets.all(32.0),
+            padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 16.0),
             child: Column(
               children: [
-                // Chapter navigation
-                if (widget.book.chapterPositions.isNotEmpty)
+                if (_chapterWordPositions.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 16.0),
+                    padding: const EdgeInsets.only(bottom: 12.0),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Text('Chapters:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                        Text(
+                          'Chapters:',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: settings.textColor,
+                          ),
+                        ),
                         const SizedBox(width: 8),
                         IconButton(
-                          icon: const Icon(Icons.first_page),
+                          icon: Icon(Icons.first_page, color: settings.textColor),
                           iconSize: 28,
                           onPressed: _previousChapter,
                           tooltip: 'Previous Chapter',
                         ),
                         IconButton(
-                          icon: const Icon(Icons.last_page),
+                          icon: Icon(Icons.last_page, color: settings.textColor),
                           iconSize: 28,
                           onPressed: _nextChapter,
                           tooltip: 'Next Chapter',
@@ -422,37 +416,40 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
                       ],
                     ),
                   ),
-                
-                // Sentence navigation
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 16.0),
+                  padding: const EdgeInsets.only(bottom: 12.0),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text('Sentences:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                      Text(
+                        'Sentences:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: settings.textColor,
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       IconButton(
-                        icon: const Icon(Icons.arrow_back),
+                        icon: Icon(Icons.arrow_back, color: settings.textColor),
                         iconSize: 28,
                         onPressed: _previousSentence,
-                        tooltip: 'Previous Sentence',
+                        tooltip: 'Previous Sentence / Line',
                       ),
                       IconButton(
-                        icon: const Icon(Icons.arrow_forward),
+                        icon: Icon(Icons.arrow_forward, color: settings.textColor),
                         iconSize: 28,
                         onPressed: _nextSentence,
-                        tooltip: 'Next Sentence',
+                        tooltip: 'Next Sentence / Line',
                       ),
                     ],
                   ),
                 ),
-                
-                // Main playback controls
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.skip_previous),
+                      icon: Icon(Icons.skip_previous, color: settings.textColor),
                       iconSize: 48,
                       onPressed: () {
                         setState(() {
@@ -464,13 +461,16 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
                     ),
                     const SizedBox(width: 32),
                     IconButton(
-                      icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
+                      icon: Icon(
+                        _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                        color: settings.textColor,
+                      ),
                       iconSize: 64,
                       onPressed: _togglePlayPause,
                     ),
                     const SizedBox(width: 32),
                     IconButton(
-                      icon: const Icon(Icons.skip_next),
+                      icon: Icon(Icons.skip_next, color: settings.textColor),
                       iconSize: 48,
                       onPressed: () {
                         setState(() {
@@ -485,10 +485,8 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
               ],
             ),
           ),
-
-          // Speed control
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 16.0),
+            padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 12.0),
             child: Column(
               children: [
                 Text(
@@ -507,8 +505,6 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
                   label: '${settings.wordsPerMinute} WPM',
                   onChanged: (value) {
                     context.read<SettingsProvider>().updateWPM(value.toInt());
-                    
-                    // Restart timer if playing
                     if (_isPlaying) {
                       _timer?.cancel();
                       _startReading();
@@ -518,8 +514,7 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
               ],
             ),
           ),
-          
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
         ],
       ),
     );
@@ -555,47 +550,7 @@ class _SpeedReaderScreenState extends State<SpeedReaderScreen> {
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  ChoiceChip(
-                    label: const Text('Light'),
-                    selected: provider.settings.backgroundColor == Colors.white,
-                    onSelected: (selected) {
-                      if (selected) {
-                        provider.updateColors(
-                          backgroundColor: Colors.white,
-                          textColor: Colors.black,
-                        );
-                      }
-                    },
-                  ),
-                  ChoiceChip(
-                    label: const Text('Dark'),
-                    selected: provider.settings.backgroundColor == Colors.black,
-                    onSelected: (selected) {
-                      if (selected) {
-                        provider.updateColors(
-                          backgroundColor: Colors.black,
-                          textColor: Colors.white,
-                        );
-                      }
-                    },
-                  ),
-                  ChoiceChip(
-                    label: const Text('Sepia'),
-                    selected: provider.settings.backgroundColor == const Color(0xFFF4ECD8),
-                    onSelected: (selected) {
-                      if (selected) {
-                        provider.updateColors(
-                          backgroundColor: const Color(0xFFF4ECD8),
-                          textColor: const Color(0xFF5B4636),
-                        );
-                      }
-                    },
-                  ),
-                ],
-              ),
+              ReadingThemeChips(provider: provider),
             ],
           ),
         ),

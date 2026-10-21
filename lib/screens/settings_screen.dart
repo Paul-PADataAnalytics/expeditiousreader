@@ -1,8 +1,9 @@
-// filepath: /home/paul/Documents/projects/expeditiousreader/lib/screens/settings_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/settings_provider.dart';
 import '../models/reading_settings.dart';
+import '../providers/library_provider.dart';
+import '../providers/settings_provider.dart';
+import '../widgets/reader_shared_widgets.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -53,7 +54,7 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
-          
+
           const Divider(height: 32),
 
           // SPEED READING SECTION
@@ -140,54 +141,14 @@ class SettingsScreen extends StatelessWidget {
                     );
                   },
                 ),
-                
+
                 const Divider(indent: 16, endIndent: 16, height: 32),
-                
+
                 _buildSubsectionHeader(context, 'Reading Theme'),
-                _buildHintText(context, 'Choose the color scheme for speed reading mode'),
+                _buildHintText(context, 'Choose the color scheme for reading mode'),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Wrap(
-                    spacing: 8,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('Light'),
-                        selected: provider.settings.backgroundColor == Colors.white,
-                        onSelected: (selected) {
-                          if (selected) {
-                            provider.updateColors(
-                              backgroundColor: Colors.white,
-                              textColor: Colors.black,
-                            );
-                          }
-                        },
-                      ),
-                      ChoiceChip(
-                        label: const Text('Dark'),
-                        selected: provider.settings.backgroundColor == Colors.black,
-                        onSelected: (selected) {
-                          if (selected) {
-                            provider.updateColors(
-                              backgroundColor: Colors.black,
-                              textColor: Colors.white,
-                            );
-                          }
-                        },
-                      ),
-                      ChoiceChip(
-                        label: const Text('Sepia'),
-                        selected: provider.settings.backgroundColor == const Color(0xFFF4ECD8),
-                        onSelected: (selected) {
-                          if (selected) {
-                            provider.updateColors(
-                              backgroundColor: const Color(0xFFF4ECD8),
-                              textColor: const Color(0xFF5B4636),
-                            );
-                          }
-                        },
-                      ),
-                    ],
-                  ),
+                  child: ReadingThemeChips(provider: provider),
                 ),
                 const SizedBox(height: 8),
               ],
@@ -202,6 +163,14 @@ class SettingsScreen extends StatelessWidget {
             builder: (context, provider, child) => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                SwitchListTile(
+                  title: const Text('Original Line Breaks & Headings'),
+                  subtitle: const Text('Preserve carriage returns and scale heading sizes'),
+                  value: provider.settings.respectFormatting,
+                  onChanged: (value) {
+                    provider.updateRespectFormatting(value);
+                  },
+                ),
                 ListTile(
                   title: const Text('Font Size'),
                   subtitle: Text('${provider.settings.traditionalFontSize.toStringAsFixed(0)} pt'),
@@ -220,74 +189,126 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
                 ListTile(
-                  title: const Text('Words Per Page'),
-                  subtitle: Text('${provider.settings.wordsPerPage} words'),
+                  title: const Text('Number of Columns'),
+                  subtitle: Text('${provider.settings.numberOfColumns} column(s)'),
                   trailing: SizedBox(
                     width: 200,
                     child: Slider(
-                      value: provider.settings.wordsPerPage.toDouble(),
-                      min: 100,
-                      max: 500,
-                      divisions: 40,
-                      label: '${provider.settings.wordsPerPage}',
+                      value: provider.settings.numberOfColumns.toDouble(),
+                      min: 1,
+                      max: 3,
+                      divisions: 2,
+                      label: '${provider.settings.numberOfColumns}',
                       onChanged: (value) {
                         provider.updateSettings(
-                          provider.settings.copyWith(wordsPerPage: value.toInt()),
+                          provider.settings.copyWith(numberOfColumns: value.toInt()),
                         );
                       },
                     ),
                   ),
                 ),
-                
+                ListTile(
+                  title: const Text('Column Gap'),
+                  subtitle: Text('${provider.settings.columnGap.toStringAsFixed(0)} px'),
+                  trailing: SizedBox(
+                    width: 200,
+                    child: Slider(
+                      value: provider.settings.columnGap,
+                      min: 16,
+                      max: 64,
+                      divisions: 12,
+                      label: provider.settings.columnGap.toStringAsFixed(0),
+                      onChanged: (value) {
+                        provider.updateSettings(
+                          provider.settings.copyWith(columnGap: value),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                ListTile(
+                  title: const Text('Line Height'),
+                  subtitle: Text('${provider.settings.lineHeight.toStringAsFixed(1)}x'),
+                  trailing: SizedBox(
+                    width: 200,
+                    child: Slider(
+                      value: provider.settings.lineHeight,
+                      min: 1.0,
+                      max: 2.5,
+                      divisions: 15,
+                      label: provider.settings.lineHeight.toStringAsFixed(1),
+                      onChanged: (value) {
+                        provider.updateSettings(
+                          provider.settings.copyWith(lineHeight: value),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+
                 const Divider(indent: 16, endIndent: 16, height: 32),
-                
+
                 _buildSubsectionHeader(context, 'Reading Theme'),
-                _buildHintText(context, 'Choose the color scheme for traditional reading mode'),
+                _buildHintText(context, 'Choose the color scheme for reading mode'),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Wrap(
+                  child: ReadingThemeChips(provider: provider),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+
+          const Divider(height: 32),
+
+          // CATALOGUE SERVER SECTION (OPTIONAL)
+          _buildSectionHeader('Catalogue Server (Optional)'),
+          Consumer<LibraryProvider>(
+            builder: (context, libProvider, child) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ListTile(
+                  leading: Icon(
+                    libProvider.isCatalogueAvailable ? Icons.cloud_done : Icons.cloud_off,
+                    color: libProvider.isCatalogueAvailable ? Colors.green : Colors.grey,
+                  ),
+                  title: Text(
+                    libProvider.isCatalogueAvailable
+                        ? 'Connected to Catalogue Server'
+                        : 'Standalone Mode (No Catalogue Server Reached)',
+                  ),
+                  subtitle: Text('Server URL: ${libProvider.catalogueServerUrl}'),
+                  trailing: Wrap(
                     spacing: 8,
                     children: [
-                      ChoiceChip(
-                        label: const Text('Light'),
-                        selected: provider.settings.backgroundColor == Colors.white,
-                        onSelected: (selected) {
-                          if (selected) {
-                            provider.updateColors(
-                              backgroundColor: Colors.white,
-                              textColor: Colors.black,
-                            );
-                          }
+                      OutlinedButton(
+                        onPressed: () async {
+                          final ok = await libProvider.refreshCatalogueStatus();
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                ok
+                                    ? 'Connected to ${libProvider.catalogueServerUrl}'
+                                    : 'Catalogue Server unreachable — using local library mode',
+                              ),
+                            ),
+                          );
                         },
+                        child: const Text('Test'),
                       ),
-                      ChoiceChip(
-                        label: const Text('Dark'),
-                        selected: provider.settings.backgroundColor == Colors.black,
-                        onSelected: (selected) {
-                          if (selected) {
-                            provider.updateColors(
-                              backgroundColor: Colors.black,
-                              textColor: Colors.white,
-                            );
-                          }
-                        },
-                      ),
-                      ChoiceChip(
-                        label: const Text('Sepia'),
-                        selected: provider.settings.backgroundColor == const Color(0xFFF4ECD8),
-                        onSelected: (selected) {
-                          if (selected) {
-                            provider.updateColors(
-                              backgroundColor: const Color(0xFFF4ECD8),
-                              textColor: const Color(0xFF5B4636),
-                            );
-                          }
-                        },
+                      FilledButton.tonal(
+                        onPressed: () => _showCatalogueUrlDialog(context, libProvider),
+                        child: const Text('Configure'),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                _buildHintText(
+                  context,
+                  'When hosted alongside Catalogue (/app/), the server URL is detected automatically. '
+                  'If no Catalogue server is running, Expeditious Reader works completely offline with local books.',
+                ),
               ],
             ),
           ),
@@ -406,6 +427,49 @@ class SettingsScreen extends StatelessWidget {
         return 'Always use dark theme';
       case ThemeMode.system:
         return 'Follow system theme settings';
+    }
+  }
+
+  Future<void> _showCatalogueUrlDialog(
+    BuildContext context,
+    LibraryProvider libProvider,
+  ) async {
+    final controller = TextEditingController(text: libProvider.catalogueServerUrl);
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Configure Catalogue Server URL'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'http://localhost:8000',
+            labelText: 'Server URL (leave empty to auto-detect)',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (updated != null) {
+      final ok = await libProvider.updateCatalogueServerUrl(updated);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? 'Connected to Catalogue Server (${libProvider.catalogueServerUrl})'
+                : 'Saved URL (${libProvider.catalogueServerUrl}) — server currently offline',
+          ),
+        ),
+      );
     }
   }
 }
